@@ -36,6 +36,10 @@ def create_database():
 if __name__ == "__main__":
     create_database()
 
+
+
+# TO CREATE SQLITE DATABASE
+
 # import os
 # from sqlalchemy import create_engine
 # from sqlalchemy.ext.declarative import declarative_base
@@ -45,8 +49,8 @@ if __name__ == "__main__":
 # # Load environment variables
 # load_dotenv()
 
-# # SQLite database URI (example: "sqlite:///./test.db")
-# DATABASE_URL = os.getenv('DATABASE_URL', 'sqlite:///./new.db')  # Use default SQLite URL if not set in .env
+# # SQLite database URI (example: "sqlite:///./.db")
+# DATABASE_URL = os.getenv('DATABASE_URL', 'sqlite:///./power.db')  # Use default SQLite URL if not set in .env
 
 # # Create database engine (SQLite will automatically create the database file if it doesn't exist)
 # engine = create_engine(DATABASE_URL, connect_args={"check_same_thread": False})  # Required for SQLite
