@@ -2,10 +2,9 @@ from datetime import datetime, timedelta
 import uuid
 from fastapi import HTTPException
 from sqlalchemy.orm import Session
-from app.models.reset_token import ResetToken
-from app.models.user import User
-from app.models.user_auth import UserAuth
-from app.services.google_auth_service import GoogleAuthService
+
+from app.models import User, UserAuth, ResetToken
+
 from app.services.otp_service import OTPService
 from app.utils.email_util import send_email
 from app.utils.hashing import Hash
@@ -121,44 +120,6 @@ class AuthService:
         # If verified, generate a token
         token = create_access_token({"sub": str(user.id)})
         return {"access_token": token, "token_type": "bearer"}
-
-    def login_or_signup_with_google(self, code: str, db: Session):
-        # Step 1: Exchange code for tokens
-        tokens = GoogleAuthService.exchange_code_for_tokens(code)
-
-        # Step 2: Get user info from ID token
-        user_info = GoogleAuthService.get_user_info(tokens["id_token"])
-        email = user_info["email"]
-        username = user_info.get("name", email.split("@")[0])
-
-        # Step 3: Check if user exists
-        user = db.query(User).filter(User.email == email).first()
-
-        if not user:
-            # Step 4: Register new user if not found
-            user = User(email=email, username=username, is_verified=True)
-            db.add(user)
-            db.commit()
-            db.refresh(user)
-
-            # Add user auth details for Google login
-            user_auth = UserAuth(
-                user_id=user.id,
-                auth_provider="google",
-                password_hash=None  # No password for Google login
-            )
-            db.add(user_auth)
-            db.commit()
-
-        # Step 5: Generate access token
-        access_token = create_access_token({"sub": str(user.id)})
-        return {
-            "message": "Login successful",
-            "access_token": access_token,
-            "token_type": "bearer",
-            "user": {"id": user.id, "email": user.email, "username": user.username},
-        }
-    
 
 
     def forgot_password(self, email: str):

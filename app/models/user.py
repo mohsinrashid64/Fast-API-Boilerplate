@@ -9,10 +9,11 @@ class User(Base):
     username = Column(String(50), unique=True, nullable=False)
     email = Column(String(255), unique=True, nullable=False)
     phone_number = Column(String(15), unique=True, nullable=True)
-    profile_picture_url = Column(Text, nullable=True)
     is_verified = Column(Boolean, default=False)
     created_at = Column(DateTime, default=func.now())
     updated_at = Column(DateTime, default=func.now(), onupdate=func.now())
 
     auth = relationship("UserAuth", back_populates="user", cascade="all, delete-orphan")
     reset_tokens = relationship("ResetToken", back_populates="user")
+
+    products = relationship("Product", back_populates="user", cascade="all, delete-orphan")

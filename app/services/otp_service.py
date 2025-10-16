@@ -1,8 +1,7 @@
 from datetime import datetime
 from sqlalchemy.orm import Session
 from fastapi import HTTPException
-from app.models.otp import OTP
-from app.models.user import User
+from app.models import User, OTP
 from app.utils.otp_util import generate_otp, otp_expiry
 from app.utils.email_util import send_email
 from app.utils.sms_util import send_sms

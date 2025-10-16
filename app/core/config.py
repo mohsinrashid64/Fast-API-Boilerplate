@@ -15,6 +15,8 @@ class Settings(BaseSettings):
     DATABASE_URL: str = "sqlite:///./power.db"
 
     class Config:
-        env_file = ".env"   # load variables from .env
+        env_file = ".env"
+        env_file_encoding = "utf-8"
+
 
 settings = Settings()

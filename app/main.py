@@ -1,42 +1,42 @@
-from contextlib import asynccontextmanager
+# main.py
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from app.routes import auth, otp, user
-from app.middlewares.auth_middleware import AuthMiddleware
-from app.database.db_config import create_database  # Import create_database function
+from app.core.error_handlers import init_exception_handlers
+from app.core.config import settings
+from app.routes import router as api_router
+from app.middlewares import init_middlewares
+from app.database import create_database
 
-@asynccontextmanager
-async def lifespan(app: FastAPI):
-    # Code to execute during application startup
-    print("Application is starting up...")
-    create_database()  # Call the function to create the database and tables
+def create_app() -> FastAPI:
+    app = FastAPI(
+        title=settings.APP_NAME,
+        debug=settings.DEBUG,
+        version="1.0.0",
+    )
+    create_database()
+    # Global exception handlers
+    init_exception_handlers(app)
 
-    yield  # Application is running here
-    # Code to execute during application shutdown
-    print("Application is shutting down...")
+    # Middleware
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=["*"],
+        allow_credentials=True,
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
+    init_middlewares(app)
 
-app = FastAPI(lifespan=lifespan)
-
-# Add CORS middleware for cross-origin requests
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],  # Replace with allowed origins for production
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
-app.add_middleware(AuthMiddleware)
-
-# Include route modules
-app.include_router(auth.router)
-app.include_router(user.router)
-app.include_router(otp.router)
+    # Routers
+    app.include_router(api_router)
 
 
+    # Health check
+    @app.get("/", tags=["Health Check"])
+    def health_check():
+        return {"status": "ok", "message": "API is running successfully"}
+
+    return app
 
 
-# Health Check Route
-@app.get("/", tags=["Health Check"])
-def health_check():
-    return {"status": "ok", "message": "API is running successfully"}
-
+app = create_app()
