@@ -29,6 +29,6 @@ def generate_otp(data: OTPCreate, db: Session = Depends(get_db)):
 
 
 @router.post("/verify")
-def verify_otp(data: OTPVerify, db: Session = Depends(get_db)):
+async def verify_otp(data: OTPVerify, db: Session = Depends(get_db)):
     otp_service = OTPService(db)
-    return otp_service.verify_otp(encrypted_user_id=data.user_id, otp_code=data.otp_code)
+    return await otp_service.verify_otp(encrypted_user_id=data.user_id, otp_code=data.otp_code)

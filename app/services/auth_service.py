@@ -2,6 +2,7 @@ from datetime import datetime, timedelta
 import uuid
 from fastapi import HTTPException
 from sqlalchemy.orm import Session
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import User, UserAuth, ResetToken
 
@@ -11,25 +12,32 @@ from app.utils.hashing import Hash
 from app.utils.jwt import create_access_token
 from app.utils.crypto_util import encrypt_data
 from app.services.otp_service import OTPService
+from sqlalchemy import select
+
+
 
 class AuthService:
-    def __init__(self, db: Session):
+    def __init__(self, db: AsyncSession):
         self.db = db
 
-    def signup(self, data):
-        # Check for duplicate user
-        if self.db.query(User).filter(
+    async def signup(self, data):
+        # 🔹 Check for duplicate user
+        query = select(User).where(
             (User.email == data.email) |
             (User.username == data.username) |
             (User.phone_number == data.phone_number)
-        ).first():
+        )
+        result = await self.db.execute(query)
+        existing_user = result.scalar_one_or_none()
+
+        if existing_user:
             raise HTTPException(status_code=400, detail="User already exists")
 
-        # Validate password confirmation
+        # 🔹 Validate password confirmation
         if data.password != data.confirm_password:
             raise HTTPException(status_code=400, detail="Passwords do not match")
 
-        # Validate otp_type and corresponding contact
+        # 🔹 Validate OTP type
         if data.otp_type not in ["email", "phone", "both"]:
             raise HTTPException(status_code=400, detail="Invalid otp_type")
 
@@ -38,41 +46,34 @@ class AuthService:
         elif data.otp_type == "phone" and not data.phone_number:
             raise HTTPException(status_code=400, detail="Phone number is required for phone otp_type")
 
-        # Hash the password
+        # 🔹 Hash the password
         hashed_password = Hash.hash(data.password)
 
-        # Create new user
-
-
+        # 🔹 Create new user
         user = User(
             username=data.username,
             email=data.email,
             phone_number=data.phone_number if data.phone_number else None
         )
         self.db.add(user)
-        self.db.commit()
-        self.db.refresh(user)
+        await self.db.commit()
+        await self.db.refresh(user)
 
-        # Create user authentication entry
+        # 🔹 Create user authentication entry
         user_auth = UserAuth(
             user_id=user.id,
             auth_provider="password",
             password_hash=hashed_password
         )
         self.db.add(user_auth)
-        self.db.commit()
+        await self.db.commit()
 
-        # Generate and send OTP
+        # 🔹 Generate and send OTP
         otp_service = OTPService(self.db)
         contact_type = data.otp_type
-        contact = None
+        contact = data.email if contact_type == "email" else data.phone_number
 
-        if contact_type == 'email':
-            contact = data.email
-        elif contact_type == 'phone':
-            contact = data.phone_number
-
-        otp_service.generate_and_send_otp(user_id=user.id, contact=contact, contact_type=contact_type)
+        await otp_service.generate_and_send_otp(user_id=user.id, contact=contact, contact_type=contact_type)
 
         encrypted_user_id = encrypt_data(str(user.id))
 
@@ -82,42 +83,51 @@ class AuthService:
         }
 
 
-    def login(self, username_or_email_or_phone, password):
-        user = self.db.query(User).filter(
+    async def login(self, username_or_email_or_phone: str, password: str):
+        # 🔹 Step 1: Get user by email, username, or phone
+        stmt = select(User).where(
             (User.email == username_or_email_or_phone) |
             (User.username == username_or_email_or_phone) |
             (User.phone_number == username_or_email_or_phone)
-        ).first()
+        )
+        result = await self.db.execute(stmt)
+        user = result.scalar_one_or_none()
 
         if not user:
             raise HTTPException(status_code=400, detail="Invalid credentials")
 
-        user_auth = self.db.query(UserAuth).filter(
-            UserAuth.user_id == user.id,
-            UserAuth.auth_provider == "password"
-        ).first()
+        # 🔹 Step 2: Get user's auth info
+        auth_stmt = select(UserAuth).where(
+            (UserAuth.user_id == user.id) &
+            (UserAuth.auth_provider == "password")
+        )
+        auth_result = await self.db.execute(auth_stmt)
+        user_auth = auth_result.scalar_one_or_none()
+
         if not user_auth or not Hash.verify(password, user_auth.password_hash):
             raise HTTPException(status_code=400, detail="Invalid credentials")
 
-
+        # 🔹 Step 3: If not verified, generate and send OTP
         if not user.is_verified:
-            # Generate and send OTP
             otp_service = OTPService(self.db)
             contact = user.email if user.email else user.phone_number
             contact_type = "email" if user.email else "phone"
 
-            otp_response = otp_service.generate_and_send_otp(user_id=user.id, contact=contact, contact_type=contact_type)
+            otp_response = await otp_service.generate_and_send_otp(
+                user_id=user.id,
+                contact=contact,
+                contact_type=contact_type
+            )
             encrypted_user_id = encrypt_data(str(user.id))
 
-            # Return response indicating OTP was sent
             return {
                 "message": "Account not verified. An OTP has been sent to your registered contact.",
                 "otp_sent_to": contact,
                 "expires_at": otp_response["expires_at"],
-                "user_id":encrypted_user_id
+                "user_id": encrypted_user_id
             }
 
-        # If verified, generate a token
+        # 🔹 Step 4: If verified, generate JWT
         token = create_access_token({"sub": str(user.id)})
         return {"access_token": token, "token_type": "bearer"}
 

@@ -1,76 +1,39 @@
-
-
-# import os
-# from sqlalchemy import create_engine
-# from sqlalchemy.ext.declarative import declarative_base
-# from sqlalchemy.orm import sessionmaker
-# from dotenv import load_dotenv
-
-# # Load environment variables
-# load_dotenv()
-
-# # PostgreSQL database URI (example: "postgresql://username:password@localhost/db_name")
-# DATABASE_URL = os.getenv('DATABASE_URL')
-
-# # Create database engine
-# engine = create_engine("postgresql://postgres:postgreselectric117@localhost:5432/FAST_API_TEST")
-
-
-# # Session and Base for SQLAlchemy
-# SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
-# Base = declarative_base()
-
-# # Dependency to get the database session
-# def get_db():
-#     db = SessionLocal()
-#     try:
-#         yield db
-#     finally:
-#         db.close()
-
-
-# def create_database():
-#     Base.metadata.create_all(bind=engine)
-
-
-# if __name__ == "__main__":
-#     create_database()
-
-
-
-# TO CREATE SQLITE DATABASE
-
 import os
-from sqlalchemy import create_engine
-from sqlalchemy.ext.declarative import declarative_base
-from sqlalchemy.orm import sessionmaker
+import asyncio
+from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
+from sqlalchemy.orm import sessionmaker, declarative_base
 from dotenv import load_dotenv
 
 # Load environment variables
 load_dotenv()
 
-# SQLite database URI (example: "sqlite:///./.db")
-DATABASE_URL = os.getenv('DATABASE_URL', 'sqlite:///./power.db')  # Use default SQLite URL if not set in .env
+# Use async SQLite by default
+DATABASE_URL = os.getenv("DATABASE_URL", "sqlite+aiosqlite:///./power.db")
 
-# Create database engine (SQLite will automatically create the database file if it doesn't exist)
-engine = create_engine(DATABASE_URL, connect_args={"check_same_thread": False})  # Required for SQLite
+# ✅ Create async engine (aiosqlite supports async I/O)
+engine = create_async_engine(DATABASE_URL, echo=True, future=True)
 
-# Session and Base for SQLAlchemy
-SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+# ✅ Create async session
+AsyncSessionLocal = sessionmaker(
+    bind=engine,
+    expire_on_commit=False,
+    class_=AsyncSession,
+)
+
+# ✅ Declarative Base
 Base = declarative_base()
 
-# Dependency to get the database session
-def get_db():
-    db = SessionLocal()
-    try:
-        yield db
-    finally:
-        db.close()
+# ✅ Dependency for FastAPI routes
+async def get_db():
+    async with AsyncSessionLocal() as session:
+        yield session
 
-# Create the tables automatically (this should be run once to initialize the database)
-def create_database():
-    Base.metadata.create_all(bind=engine)
+# ✅ Async function to create tables
+async def create_database():
+    print('Creating database tables...')
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
 
-# Optionally, call the create_database function to initialize the database
+# ✅ Optional: for manual creation
 if __name__ == "__main__":
-    create_database()
+    asyncio.run(create_database())

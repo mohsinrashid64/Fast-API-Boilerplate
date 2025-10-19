@@ -13,8 +13,9 @@ def create_app() -> FastAPI:
         debug=settings.DEBUG,
         version="1.0.0",
     )
-    create_database()
-    # Global exception handlers
+    @app.on_event("startup")
+    async def on_startup():
+        await create_database()    # Global exception handlers
     init_exception_handlers(app)
 
     # Middleware

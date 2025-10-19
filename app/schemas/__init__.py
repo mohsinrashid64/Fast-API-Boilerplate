@@ -1,7 +1,7 @@
 from .auth import SignUpRequest,LoginRequest,ForgotPasswordRequest,ResetPasswordRequest
 from .otp import OTPBase,OTPCreate,OTPVerify,OTPResponse
 from .user import UserBase, UserResponse
-from .product import ProductBase, ProductCreate, ProductResponse    
+from .product import ProductBase, ProductCreate    
 
 __all__ = [
     # auth
@@ -23,5 +23,7 @@ __all__ = [
     # product
     "ProductBase", 
     "ProductCreate", 
-    "ProductResponse" 
+    "ProductUpdate",
+    "ProductResponse",
+    "ProductOut"
 ]

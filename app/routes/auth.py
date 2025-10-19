@@ -1,5 +1,7 @@
 from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
+from sqlalchemy.ext.asyncio import AsyncSession
+
 from app.database import get_db
 from app.services import AuthService
 from app.schemas import ForgotPasswordRequest, ResetPasswordRequest, SignUpRequest, LoginRequest
@@ -8,14 +10,17 @@ from app.schemas import ForgotPasswordRequest, ResetPasswordRequest, SignUpReque
 router = APIRouter(prefix="/auth", tags=["Auth"])
 
 
+
 @router.post("/signup")
-def signup(data: SignUpRequest, db: Session = Depends(get_db)):
-    return AuthService(db).signup(data)
+async def signup(data: SignUpRequest, db: AsyncSession = Depends(get_db)):
+    auth_service = AuthService(db)
+    return await auth_service.signup(data)
 
 
 @router.post("/login")
-def login(data: LoginRequest, db: Session = Depends(get_db)):
-    return AuthService(db).login(
+async def login(data: LoginRequest, db: AsyncSession = Depends(get_db)):
+    auth_service = AuthService(db)
+    return await auth_service.login(
         username_or_email_or_phone=data.username_or_email_or_phone,
         password=data.password
     )
