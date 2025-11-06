@@ -10,6 +10,9 @@ class Settings(BaseSettings):
     SECRET_KEY: str | None = None
     ENCRYPTION_KEY: str | None = None
     DATABASE_URL: str = "sqlite:///./power.db"
+    GOOGLE_CLIENT_ID: str | None = None
+    GOOGLE_CLIENT_SECRET: str | None = None
+    GOOGLE_REDIRECT_URI: str | None = None
 
     class Config:
         env_file = ".env"
