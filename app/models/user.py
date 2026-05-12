@@ -1,10 +1,12 @@
 from sqlalchemy import Column, Integer, String, Boolean, Text, DateTime, func
 from sqlalchemy.orm import relationship
 from app.database.db_config import Base
+from app.models.role import user_roles
+
 
 class User(Base):
     __tablename__ = "users"
-    
+
     id = Column(Integer, primary_key=True, index=True)
     username = Column(String(50), unique=True, nullable=False)
     email = Column(String(255), unique=True, nullable=False)
@@ -15,5 +17,6 @@ class User(Base):
 
     auth = relationship("UserAuth", back_populates="user", cascade="all, delete-orphan")
     reset_tokens = relationship("ResetToken", back_populates="user")
-
+    refresh_tokens = relationship("RefreshToken", back_populates="user", cascade="all, delete-orphan")
     products = relationship("Product", back_populates="user", cascade="all, delete-orphan")
+    roles = relationship("Role", secondary=user_roles, back_populates="users", lazy="selectin")

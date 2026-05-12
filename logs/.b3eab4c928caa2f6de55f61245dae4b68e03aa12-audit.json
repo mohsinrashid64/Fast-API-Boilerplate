@@ -1,0 +1,20 @@
+{
+    "keep": {
+        "days": true,
+        "amount": 14
+    },
+    "auditLog": "d:\\Work\\Projects\\Python\\Fast API Boilerplate\\logs\\.b3eab4c928caa2f6de55f61245dae4b68e03aa12-audit.json",
+    "files": [
+        {
+            "date": 1774961935971,
+            "name": "d:\\Work\\Projects\\Python\\Fast API Boilerplate\\logs\\mcp-puppeteer-2026-03-31.log",
+            "hash": "bc234e93249cb83ab50e76c5a52c7fbb41d83441c33c8fa9cf30f07a3c3e30d1"
+        },
+        {
+            "date": 1775046418525,
+            "name": "d:\\Work\\Projects\\Python\\Fast API Boilerplate\\logs\\mcp-puppeteer-2026-04-01.log",
+            "hash": "233a66d9f927a0f489921c829d3a7c1f6c2bf2b1d04294806761f28b88a122ad"
+        }
+    ],
+    "hashType": "sha256"
+}

@@ -10,14 +10,27 @@ class UserBase(BaseModel):
 
 
 class UserResponse(BaseModel):
-    id: int  # The encrypted ID sent to the client as a string
+    id: int
     username: str
     email: str
     phone_number: Optional[str]
     is_verified: bool
+    roles: list[str] = []
 
     class Config:
-        from_attributes = True  # ✅ allow parsing ORM objects
+        from_attributes = True
+
+    @classmethod
+    def from_user(cls, user):
+        """Build response from a User ORM object, flattening role names."""
+        return cls(
+            id=user.id,
+            username=user.username,
+            email=user.email,
+            phone_number=user.phone_number,
+            is_verified=user.is_verified,
+            roles=[r.name for r in user.roles] if user.roles else [],
+        )
 
     # # Automatically encrypt user_id before sending the response
     # @model_validator(mode="before")
