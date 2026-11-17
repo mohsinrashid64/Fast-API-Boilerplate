@@ -1,25 +1,35 @@
-import smtplib
+import logging
 from email.mime.text import MIMEText
-from fastapi import HTTPException
+
+import aiosmtplib
+
+from app.core.config import settings
+
+logger = logging.getLogger(__name__)
 
 
-def send_email(to: str, subject: str, body: str):
-    sender = "mohsinrashid64@gmail.com"  # Replace with your Gmail address
-    password = "svmx bxhr mzod orlc"  # Replace with your Gmail/App Password
-    smtp_server = "smtp.gmail.com"
-    smtp_port = 587  # Use 465 for SSL
+async def send_email(to: str, subject: str, body: str, html: bool = False) -> None:
+    """Send an email via SMTP (credentials come from settings / .env).
 
-    try:
-        # Create the email content
-        msg = MIMEText(body)
-        msg["Subject"] = subject
-        msg["From"] = sender
-        msg["To"] = to
+    If SMTP is not configured in a non-production environment, the email is
+    logged instead of sent, so local development works without credentials.
+    """
+    if not (settings.SMTP_USER and settings.SMTP_PASSWORD):
+        if settings.is_production:
+            raise RuntimeError("SMTP is not configured (SMTP_USER / SMTP_PASSWORD)")
+        logger.warning("SMTP not configured; email to %s not sent.\nSubject: %s\n%s", to, subject, body)
+        return
 
-        # Connect to the SMTP server
-        with smtplib.SMTP(smtp_server, smtp_port) as server:
-            server.starttls()  # Upgrade the connection to TLS
-            server.login(sender, password)  # Log in to the SMTP server
-            server.sendmail(sender, [to], msg.as_string())  # Send the email
-    except smtplib.SMTPException as e:
-        raise HTTPException(status_code=500, detail=f"Failed to send email: {str(e)}")
+    msg = MIMEText(body, "html" if html else "plain")
+    msg["From"] = settings.SMTP_FROM or settings.SMTP_USER
+    msg["To"] = to
+    msg["Subject"] = subject
+
+    await aiosmtplib.send(
+        msg,
+        hostname=settings.SMTP_HOST,
+        port=settings.SMTP_PORT,
+        username=settings.SMTP_USER,
+        password=settings.SMTP_PASSWORD,
+        start_tls=True,
+    )

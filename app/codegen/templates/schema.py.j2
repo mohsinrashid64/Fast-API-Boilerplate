@@ -1,0 +1,65 @@
+{{ header }}
+{% if r.needs_date %}
+from datetime import date
+{% endif %}
+{% if r.needs_datetime %}
+from datetime import datetime
+{% endif %}
+{% if r.needs_decimal %}
+from decimal import Decimal
+{% endif %}
+{% if r.needs_any %}
+from typing import Any
+{% endif %}
+
+from pydantic import BaseModel, ConfigDict, Field
+
+
+class {{ r.class_name }}Base(BaseModel):
+{% for c in r.columns %}
+{% if c.nullable %}
+    {{ c.name }}: {{ c.py_type }} | None = {% if c.field_args %}Field({{ c.schema_default or "None" }}, {{ c.field_args }}){% else %}{{ c.schema_default or "None" }}{% endif %}
+
+{% elif c.schema_default %}
+    {{ c.name }}: {{ c.py_type }} = {% if c.field_args %}Field({{ c.schema_default }}, {{ c.field_args }}){% else %}{{ c.schema_default }}{% endif %}
+
+{% elif c.default_expr %}
+    {{ c.name }}: {{ c.py_type }} | None = {% if c.field_args %}Field(None, {{ c.field_args }}){% else %}None{% endif %}  # filled in by the database if omitted
+{% else %}
+    {{ c.name }}: {{ c.py_type }}{% if c.field_args %} = Field(..., {{ c.field_args }}){% endif %}
+
+{% endif %}
+{% endfor %}
+{% for rel in r.relations if not rel.is_owner %}
+    {{ rel.column }}: int{% if rel.nullable %} | None = None{% endif %}
+
+{% endfor %}
+
+
+class {{ r.class_name }}Create({{ r.class_name }}Base):
+    pass
+
+
+class {{ r.class_name }}Update(BaseModel):
+    """All fields optional: only the fields sent are changed."""
+
+{% for c in r.columns %}
+    {{ c.name }}: {{ c.py_type }} | None = {% if c.field_args %}Field(None, {{ c.field_args }}){% else %}None{% endif %}
+
+{% endfor %}
+{% for rel in r.relations if not rel.is_owner %}
+    {{ rel.column }}: int | None = None
+{% endfor %}
+
+
+class {{ r.class_name }}Out({{ r.class_name }}Base):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+{% for rel in r.relations if rel.is_owner %}
+    {{ rel.column }}: int
+{% endfor %}
+{% if r.timestamps %}
+    created_at: datetime | None = None
+    updated_at: datetime | None = None
+{% endif %}

@@ -1,0 +1,190 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Set up · {{ app_name }}</title>
+  <link rel="stylesheet" href="{{ url_for('admin:statics', path='css/tabler.min.css') }}">
+  <link rel="stylesheet" href="{{ url_for('admin:statics', path='css/fontawesome-all.min.css') }}">
+  <style>
+{% include "admin_theme.css" %}
+
+    .setup-form { max-width: 520px; }
+    .setup-step { display: flex; align-items: center; gap: 10px; margin: 28px 0 14px; font-weight: 600; font-size: 15px; }
+    .setup-step span {
+      width: 24px; height: 24px; border-radius: 50%; display: grid; place-items: center;
+      background: var(--adm-accent-soft); color: var(--adm-accent-dark); font-size: 12.5px;
+    }
+    .setup-choices { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+    .setup-choice {
+      position: relative; display: block; padding: 14px; border: 1px solid #dfe3ec; border-radius: 10px;
+      cursor: pointer; transition: border-color .15s, box-shadow .15s, background .15s;
+    }
+    .setup-choice input { position: absolute; opacity: 0; pointer-events: none; }
+    .setup-choice:hover { border-color: #c7cde0; }
+    .setup-choice.is-active { border-color: var(--adm-accent); background: #fafaff; box-shadow: 0 0 0 3px rgba(var(--adm-accent-rgb), .12); }
+    .setup-choice i { font-size: 18px; color: var(--adm-accent); }
+    .setup-choice b { display: block; margin-top: 8px; font-size: 14px; }
+    .setup-choice small { display: block; margin-top: 2px; color: var(--adm-muted); font-size: 12.5px; line-height: 1.4; }
+    .setup-choice .tag { position: absolute; top: 10px; right: 10px; font-size: 11px; font-weight: 600; color: #15803d; background: #ecfdf3; border-radius: 999px; padding: 1px 8px; }
+    .setup-panel { margin-top: 14px; }
+    .setup-panel[hidden] { display: none; }
+    .setup-hint { margin-top: 6px; font-size: 12.5px; color: var(--adm-muted); }
+    .setup-hint code { font-size: 12px; }
+    .setup-result { display: none; margin-top: 10px; padding: 10px 12px; border-radius: 8px; font-size: 13px; line-height: 1.5; }
+    .setup-result.ok { display: block; background: #ecfdf3; color: #166534; }
+    .setup-result.warn { display: block; background: #fffbeb; color: #92400e; }
+    .setup-result.err { display: block; background: #fef2f2; color: #b91c1c; }
+    .setup-actions { display: flex; gap: 10px; align-items: center; margin-top: 8px; }
+    .adm-login-main { align-items: start; }
+    .setup-env { background: rgba(255,255,255,.12); color: #e0e7ff; padding: 1px 6px; border-radius: 4px; }
+    .adm-login-form { max-width: 520px; padding-top: 24px; }
+    @media (max-width: 575.98px) { .setup-choices { grid-template-columns: 1fr; } }
+  </style>
+</head>
+<body>
+<div class="adm-login">
+  <aside class="adm-login-aside">
+    <div class="adm-login-brand">
+      <span class="adm-brand-mark"><i class="fa-solid fa-bolt"></i></span>
+      <span>{{ app_name }}</span>
+    </div>
+    <div>
+      <h1>Let's get you set up.</h1>
+      <p>Pick a database and create your admin account. We'll create the tables, run the migrations and save the settings for you.</p>
+      <ul class="adm-login-features">
+        <li><i class="fa-solid fa-database"></i> Local SQLite or your own PostgreSQL</li>
+        <li><i class="fa-solid fa-code-branch"></i> Migrations applied automatically</li>
+        <li><i class="fa-solid fa-user-shield"></i> Your superuser account for the admin panel</li>
+      </ul>
+    </div>
+    <div class="adm-login-foot">Settings are saved to <code class="setup-env">.env</code>. This page disappears once setup is done.</div>
+  </aside>
+
+  <main class="adm-login-main">
+    <form class="adm-login-form setup-form" method="post" action="/setup" id="setup-form" autocomplete="off">
+      <h2>Set up {{ app_name }}</h2>
+      <p class="lead mb-0">This takes about a minute.</p>
+
+      {% if error %}
+      <div class="adm-login-error mt-4" role="alert"><i class="fa-solid fa-circle-exclamation mt-1"></i><span>{{ error }}</span></div>
+      {% endif %}
+
+      <div class="setup-step"><span>1</span> Database</div>
+      <div class="setup-choices" role="radiogroup" aria-label="Database type">
+        <label class="setup-choice">
+          <input type="radio" name="db_mode" value="sqlite" {% if values.db_mode != 'postgres' %}checked{% endif %}>
+          <span class="tag">Easiest</span>
+          <i class="fa-solid fa-hard-drive"></i>
+          <b>Local SQLite</b>
+          <small>A single file in your project. Nothing to install.</small>
+        </label>
+        <label class="setup-choice">
+          <input type="radio" name="db_mode" value="postgres" {% if values.db_mode == 'postgres' %}checked{% endif %}>
+          <i class="fa-solid fa-server"></i>
+          <b>PostgreSQL</b>
+          <small>Paste a connection string for your server.</small>
+        </label>
+      </div>
+
+      <div class="setup-panel" data-panel="sqlite">
+        <label class="form-label" for="sqlite_path">Database file</label>
+        <input class="form-control" id="sqlite_path" name="sqlite_path" value="{{ values.sqlite_path or './power.db' }}">
+        <div class="setup-hint">Relative to the project folder. Created if it doesn't exist.</div>
+      </div>
+      <div class="setup-panel" data-panel="postgres">
+        <label class="form-label" for="database_url">Connection string</label>
+        <input class="form-control" id="database_url" name="database_url" value="{{ values.database_url or '' }}"
+          placeholder="postgresql://user:password@localhost:5432/mydb" spellcheck="false">
+        <div class="setup-hint">Formats like <code>postgres://…</code> and <code>?sslmode=require</code> (Heroku, Neon, Supabase) are converted for you.</div>
+      </div>
+      <div class="setup-actions">
+        <button type="button" class="btn btn-secondary" id="test-btn"><i class="fa-solid fa-plug me-2"></i>Test connection</button>
+      </div>
+      <div class="setup-result" id="test-result" role="status"></div>
+
+      <div class="setup-step"><span>2</span> Admin account</div>
+      <div class="row g-3">
+        <div class="col-sm-6">
+          <label class="form-label" for="username">Username</label>
+          <input class="form-control" id="username" name="username" value="{{ values.username or '' }}" required minlength="3" maxlength="50" autocomplete="username">
+        </div>
+        <div class="col-sm-6">
+          <label class="form-label" for="email">Email</label>
+          <input class="form-control" id="email" name="email" type="email" value="{{ values.email or '' }}" required autocomplete="email">
+        </div>
+        <div class="col-sm-6">
+          <label class="form-label" for="password">Password</label>
+          <input class="form-control" id="password" name="password" type="password" required minlength="8" maxlength="72" autocomplete="new-password">
+        </div>
+        <div class="col-sm-6">
+          <label class="form-label" for="password_confirm">Confirm password</label>
+          <input class="form-control" id="password_confirm" name="password_confirm" type="password" required minlength="8" maxlength="72" autocomplete="new-password">
+        </div>
+      </div>
+
+      <button type="submit" class="btn btn-primary w-100 mt-4" id="submit-btn">
+        <i class="fa-solid fa-rocket me-2"></i>Create database &amp; finish setup
+      </button>
+    </form>
+  </main>
+</div>
+
+<script>
+(function () {
+  var form = document.getElementById("setup-form");
+  var choices = form.querySelectorAll(".setup-choice");
+  var result = document.getElementById("test-result");
+
+  function mode() { return form.querySelector('input[name="db_mode"]:checked').value; }
+  function sync() {
+    choices.forEach(function (c) { c.classList.toggle("is-active", c.querySelector("input").checked); });
+    form.querySelectorAll("[data-panel]").forEach(function (p) { p.hidden = p.dataset.panel !== mode(); });
+    document.getElementById("database_url").required = mode() === "postgres";
+    result.className = "setup-result";
+  }
+  form.addEventListener("change", function (e) { if (e.target.name === "db_mode") sync(); });
+  sync();
+
+  function show(kind, html) { result.className = "setup-result " + kind; result.innerHTML = html; }
+  function esc(s) { var d = document.createElement("div"); d.textContent = s == null ? "" : String(s); return d.innerHTML; }
+
+  document.getElementById("test-btn").addEventListener("click", function () {
+    var btn = this;
+    btn.disabled = true;
+    show("ok", '<i class="fa-solid fa-spinner fa-spin me-2"></i>Connecting…');
+    fetch("/setup/test", { method: "POST", body: new FormData(form) })
+      .then(function (r) { return r.json(); })
+      .then(function (d) {
+        if (!d.ok) { show("err", '<i class="fa-solid fa-circle-xmark me-2"></i>' + esc(d.error)); return; }
+        if (d.will_create) {
+          show("ok", '<i class="fa-solid fa-circle-check me-2"></i>Looks good. A new database file will be created at <code>' + esc(d.path) + "</code>.");
+          return;
+        }
+        var head = '<i class="fa-solid fa-circle-check me-2"></i>Connected' +
+          (d.server_version ? " · " + (d.backend === "postgresql" ? "PostgreSQL " : "SQLite ") + esc(d.server_version) : "");
+        if (d.app_tables) {
+          show("ok", head + "<br>This database already has this app's tables" +
+            (d.revision ? " (migration <code>" + esc(d.revision) + "</code>)" : "") +
+            ". Any pending migrations will be applied and your account added.");
+        } else if (d.tables.length) {
+          show("warn", head + "<br>This database already contains " + d.tables.length + " other table(s): " +
+            esc(d.tables.slice(0, 6).join(", ")) + (d.tables.length > 6 ? "…" : "") +
+            ". The app's tables will be added alongside them.");
+        } else {
+          show("ok", head + " · empty database, ready to go.");
+        }
+      })
+      .catch(function () { show("err", "Could not reach the server."); })
+      .finally(function () { btn.disabled = false; });
+  });
+
+  form.addEventListener("submit", function () {
+    var btn = document.getElementById("submit-btn");
+    btn.disabled = true;
+    btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin me-2"></i>Creating tables and your account…';
+  });
+})();
+</script>
+</body>
+</html>

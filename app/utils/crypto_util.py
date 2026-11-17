@@ -1,42 +1,31 @@
-# from cryptography.fernet import Fernet
-# import os
-# from dotenv import load_dotenv
+from functools import lru_cache
 
-# load_dotenv()
+from cryptography.fernet import Fernet, InvalidToken
 
-# # Generate a key using `Fernet.generate_key()` and save it in .env as ENCRYPTION_KEY
-# ENCRYPTION_KEY = os.getenv("ENCRYPTION_KEY")
-# fernet = Fernet(ENCRYPTION_KEY.encode())
+from app.core.config import settings
 
-# def encrypt_data(data: int) -> str:
-#     """
-#     Encrypt data using Fernet.
-#     """
-#     return fernet.encrypt(data.encode()).decode()
-
-# def decrypt_data(encrypted_data: str) -> str:
-#     """
-#     Decrypt data using Fernet.
-#     """
-#     return fernet.decrypt(encrypted_data.encode()).decode()
+# The key MUST come from settings: a key generated at import time would change on
+# every restart (and differ per worker), making previously issued values undecryptable.
 
 
-from cryptography.fernet import Fernet
+@lru_cache(maxsize=2)
+def _fernet(key: str) -> Fernet:
+    return Fernet(key.encode())
 
-# Example encryption and decryption using Fernet (symmetric encryption)
-# You can replace this with any encryption method you prefer
 
-# Generate a key (this should be stored securely)
-key = Fernet.generate_key()
-cipher_suite = Fernet(key)
+def _cipher() -> Fernet:
+    if not settings.ENCRYPTION_KEY:
+        raise RuntimeError("ENCRYPTION_KEY is not configured")
+    return _fernet(settings.ENCRYPTION_KEY)
 
-def encrypt_data(data: int) -> str:
-    # Convert the integer to string and encrypt it
-    data_str = str(data)
-    encrypted_data = cipher_suite.encrypt(data_str.encode())
-    return encrypted_data.decode()  # Return as a string
+
+def encrypt_data(data: int | str) -> str:
+    return _cipher().encrypt(str(data).encode()).decode()
+
 
 def decrypt_data(encrypted_data: str) -> int:
-    # Decrypt the data and convert it back to an integer
-    decrypted_data = cipher_suite.decrypt(encrypted_data.encode()).decode()
-    return int(decrypted_data)
+    """Decrypt a value produced by `encrypt_data`. Raises ValueError if invalid."""
+    try:
+        return int(_cipher().decrypt(encrypted_data.encode()).decode())
+    except (InvalidToken, ValueError) as exc:
+        raise ValueError("Invalid encrypted value") from exc
