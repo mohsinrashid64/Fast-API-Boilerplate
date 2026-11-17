@@ -1,0 +1,53 @@
+{% extends "sqladmin/base.html" %}
+{% block body %}
+<div class="adm-login">
+  <aside class="adm-login-aside">
+    <div class="adm-login-brand">
+      <span class="adm-brand-mark">
+        {% if admin.logo_url %}<img src="{{ admin.logo_url }}" alt="">{% else %}<i class="fa-solid fa-bolt"></i>{% endif %}
+      </span>
+      <span>{{ admin.title }}</span>
+    </div>
+    <div>
+      <h1>Everything in one place.</h1>
+      <p>Manage users, products and security records for your application from a single dashboard.</p>
+      <ul class="adm-login-features">
+        <li><i class="fa-solid fa-users"></i> Users, roles and login methods</li>
+        <li><i class="fa-solid fa-box"></i> Products and inventory</li>
+        <li><i class="fa-solid fa-shield-halved"></i> OTPs and password-reset tokens</li>
+      </ul>
+    </div>
+    <div class="adm-login-foot">Restricted area: superusers only.</div>
+  </aside>
+
+  <main class="adm-login-main">
+    <form class="adm-login-form" action="{{ url_for('admin:login') }}" method="POST" autocomplete="off">
+      <h2>{{ _("Sign in") }}</h2>
+      <p class="lead">Use your superuser username or email.</p>
+
+      {% if request.query_params.get('setup') %}
+      <div class="adm-login-error" role="status" style="background:#ecfdf3;color:#166534">
+        <i class="fa-solid fa-circle-check mt-1"></i><span>Setup complete. Your database is ready. Sign in with the account you just created.</span>
+      </div>
+      {% endif %}
+      {% if error %}
+      <div class="adm-login-error" role="alert">
+        <i class="fa-solid fa-circle-exclamation mt-1"></i><span>{{ error }}</span>
+      </div>
+      {% endif %}
+
+      <div class="mb-3">
+        <label class="form-label" for="adm-username">{{ _("Username or email") }}</label>
+        <input id="adm-username" name="username" type="text" class="form-control{% if error %} is-invalid{% endif %}"
+          placeholder="admin" autocomplete="username" autofocus required>
+      </div>
+      <div class="mb-4">
+        <label class="form-label" for="adm-password">{{ _("Password") }}</label>
+        <input id="adm-password" name="password" type="password" class="form-control{% if error %} is-invalid{% endif %}"
+          placeholder="••••••••" autocomplete="current-password" required>
+      </div>
+      <button type="submit" class="btn btn-primary w-100">{{ _("Sign in") }}</button>
+    </form>
+  </main>
+</div>
+{% endblock %}

@@ -1,0 +1,64 @@
+{{ header }}
+{% if r.test_skip_reason %}
+import pytest
+
+{% endif %}
+from tests.conftest import auth_headers
+
+
+def _payload(user):
+    return {
+{% for c in r.columns %}
+        "{{ c.name }}": {{ c.sample | pyrepr }},
+{% endfor %}
+{% for rel in r.relations if not rel.is_owner and rel.target_table == "users" %}
+        "{{ rel.column }}": user.id,
+{% endfor %}
+    }
+
+
+{% if r.test_skip_reason %}
+@pytest.mark.skip(reason={{ r.test_skip_reason | pyrepr }})
+{% endif %}
+async def test_{{ r.module }}_crud(client, make_user):
+    user = await make_user("{{ r.module[:30] }}_owner")
+    headers = auth_headers(user)
+
+    r = await client.post("/{{ r.url }}/", json=_payload(user), headers=headers)
+    assert r.status_code == 201, r.text
+    item_id = r.json()["id"]
+
+    assert (await client.get(f"/{{ r.url }}/{item_id}", headers=headers)).status_code == 200
+    listed = (await client.get("/{{ r.url }}/", headers=headers)).json()
+    assert item_id in [row["id"] for row in listed]
+{% if update_col %}
+
+    r = await client.patch(f"/{{ r.url }}/{item_id}", json={"{{ update_col.name }}": {{ update_col.sample_alt | pyrepr }}}, headers=headers)
+    assert r.status_code == 200, r.text
+    assert r.json()["{{ update_col.name }}"] == {{ update_col.sample_alt | pyrepr }}
+{% endif %}
+
+    r = await client.put(f"/{{ r.url }}/{item_id}", json=_payload(user), headers=headers)
+    assert r.status_code == 200, r.text
+
+    assert (await client.delete(f"/{{ r.url }}/{item_id}", headers=headers)).status_code == 200
+    assert (await client.get(f"/{{ r.url }}/{item_id}", headers=headers)).status_code == 404
+{% if r.require_auth %}
+
+
+async def test_{{ r.module }}_requires_login(client):
+    assert (await client.get("/{{ r.url }}/")).status_code == 401
+{% endif %}
+{% if r.owner_scoped %}
+
+
+{% if r.test_skip_reason %}
+@pytest.mark.skip(reason={{ r.test_skip_reason | pyrepr }})
+{% endif %}
+async def test_{{ r.module }}_is_private_to_its_owner(client, make_user):
+    owner = await make_user("{{ r.module[:30] }}_a")
+    other = await make_user("{{ r.module[:30] }}_b")
+    r = await client.post("/{{ r.url }}/", json=_payload(owner), headers=auth_headers(owner))
+    item_id = r.json()["id"]
+    assert (await client.get(f"/{{ r.url }}/{item_id}", headers=auth_headers(other))).status_code == 404
+{% endif %}

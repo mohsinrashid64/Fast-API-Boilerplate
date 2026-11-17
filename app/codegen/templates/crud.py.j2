@@ -1,0 +1,6 @@
+{{ header }}
+from app.crud.base import CRUDBase
+from app.models.{{ r.module }} import {{ r.class_name }}
+from app.schemas.{{ r.module }} import {{ r.class_name }}Create, {{ r.class_name }}Update
+
+{{ r.module }}_crud = CRUDBase[{{ r.class_name }}, {{ r.class_name }}Create, {{ r.class_name }}Update]({{ r.class_name }})

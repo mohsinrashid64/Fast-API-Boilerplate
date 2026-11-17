@@ -1,0 +1,229 @@
+{% extends "sqladmin/layout.html" %}
+
+{% block head %}
+<style>
+  .db-alert { display: flex; gap: 10px; align-items: flex-start; padding: 12px 14px; border-radius: 10px; margin-bottom: 16px; font-size: 14px; }
+  .db-alert.success { background: #ecfdf3; color: #166534; }
+  .db-alert.error { background: #fef2f2; color: #b91c1c; }
+  .db-alert i { margin-top: 3px; }
+  .db-grid { display: grid; grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr); gap: 16px; align-items: start; }
+  .db-stack { display: grid; gap: 16px; }
+  .db-kv { display: grid; grid-template-columns: 140px minmax(0, 1fr); gap: 10px 16px; font-size: 14px; }
+  .db-kv dt { color: var(--adm-muted); font-weight: 500; }
+  .db-kv dd { margin: 0; min-width: 0; overflow-wrap: anywhere; }
+  .db-kv code { font-size: 12.5px; background: #f4f5f9; padding: 2px 6px; border-radius: 5px; color: #334155; }
+  .db-engine { display: flex; align-items: center; gap: 12px; margin-bottom: 18px; }
+  .db-engine-icon { width: 42px; height: 42px; border-radius: 11px; display: grid; place-items: center; font-size: 18px; }
+  .db-engine b { display: block; font-size: 16px; }
+  .db-engine small { color: var(--adm-muted); }
+  .db-rev { display: flex; align-items: center; gap: 12px; padding: 10px 0; border-bottom: 1px solid #f0f2f6; font-size: 14px; }
+  .db-rev:last-child { border-bottom: 0; }
+  .db-rev code { font-size: 12.5px; color: #334155; }
+  .db-rev .msg { flex: 1; min-width: 0; color: #334155; }
+  .db-dot { width: 10px; height: 10px; border-radius: 50%; flex: 0 0 10px; }
+  .db-dot.applied { background: #22c55e; }
+  .db-dot.pending { background: #f59e0b; box-shadow: 0 0 0 3px #fef3c7; }
+  .db-choices { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 12px; }
+  .db-choice { display: flex; align-items: center; gap: 8px; padding: 10px 12px; border: 1px solid #dfe3ec; border-radius: 8px; cursor: pointer; font-size: 14px; font-weight: 500; }
+  .db-choice.is-active { border-color: var(--adm-accent); background: #fafaff; box-shadow: 0 0 0 3px rgba(var(--adm-accent-rgb), .12); }
+  .db-choice input { accent-color: var(--adm-accent); }
+  .db-result { display: none; margin-top: 10px; padding: 10px 12px; border-radius: 8px; font-size: 13px; line-height: 1.5; }
+  .db-result.ok { display: block; background: #ecfdf3; color: #166534; }
+  .db-result.warn { display: block; background: #fffbeb; color: #92400e; }
+  .db-result.err { display: block; background: #fef2f2; color: #b91c1c; }
+  .db-steps { margin: 0 0 14px; padding-left: 18px; font-size: 13.5px; color: #475569; }
+  .db-steps li { margin: 3px 0; }
+  .db-note { font-size: 13px; color: var(--adm-muted); }
+  .db-blocked { padding: 12px 14px; border-radius: 8px; background: #f8fafc; border: 1px dashed #d5d9e4; color: #475569; font-size: 13.5px; }
+  @media (max-width: 1199.98px) { .db-grid { grid-template-columns: minmax(0, 1fr); } }
+  @media (max-width: 575.98px) { .db-kv { grid-template-columns: minmax(0, 1fr); gap: 2px; } .db-kv dd { margin-bottom: 8px; } }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="col-12">
+  {% if flash %}
+  <div class="db-alert {{ flash.kind }}" role="status">
+    <i class="fa-solid {{ 'fa-circle-check' if flash.kind == 'success' else 'fa-circle-exclamation' }}"></i>
+    <span>{{ flash.message }}</span>
+  </div>
+  {% endif %}
+
+  <div class="db-grid">
+    <div class="db-stack">
+      {# ---------- Current connection ---------- #}
+      <div class="card">
+        <div class="card-header"><h3 class="card-title">Current connection</h3></div>
+        <div class="card-body">
+          <div class="db-engine">
+            {% if backend == 'postgresql' %}
+            <span class="db-engine-icon adm-tone-sky"><i class="fa-solid fa-server"></i></span>
+            <div><b>PostgreSQL{% if info and info.server_version %} {{ info.server_version }}{% endif %}</b><small>via asyncpg</small></div>
+            {% else %}
+            <span class="db-engine-icon adm-tone-indigo"><i class="fa-solid fa-hard-drive"></i></span>
+            <div><b>SQLite{% if info and info.server_version %} {{ info.server_version }}{% endif %}</b><small>local file via aiosqlite</small></div>
+            {% endif %}
+            <span class="ms-auto">
+              {% if error %}<span class="adm-pill adm-pill-danger">Unreachable</span>
+              {% else %}<span class="adm-pill adm-pill-yes">Connected</span>{% endif %}
+            </span>
+          </div>
+          {% if error %}<div class="db-alert error mb-3"><i class="fa-solid fa-circle-exclamation"></i><span>{{ error }}</span></div>{% endif %}
+          <dl class="db-kv mb-0">
+            <dt>Connection</dt><dd><code>{{ active_url }}</code></dd>
+            {% if info and info.path %}<dt>File</dt><dd><code>{{ info.path }}</code></dd>{% endif %}
+            {% if info %}
+            <dt>Size</dt><dd>{{ info.size_bytes | filesizeformat }}</dd>
+            <dt>Tables</dt><dd>{{ info.tables | length }}{% if info.tables %} <span class="db-note">· {{ info.tables | join(', ') }}</span>{% endif %}</dd>
+            {% endif %}
+            <dt>Configured in</dt>
+            <dd>{% if switch_blocked and 'environment variable' in switch_blocked %}Environment variable <code>DATABASE_URL</code>{% else %}<code>.env</code> file{% endif %}</dd>
+          </dl>
+        </div>
+      </div>
+
+      {# ---------- Migrations ---------- #}
+      <div class="card">
+        <div class="card-header">
+          <h3 class="card-title">Migrations</h3>
+          <div class="ms-auto">
+            {% if status %}
+              {% if status.up_to_date %}<span class="adm-pill adm-pill-yes">Up to date</span>
+              {% else %}<span class="adm-pill adm-pill-warn">{{ status.pending | length }} pending</span>{% endif %}
+            {% endif %}
+          </div>
+        </div>
+        <div class="card-body">
+          {% if status %}
+            <p class="db-note mt-0">
+              Current revision: <code>{{ status.current or 'none' }}</code> · latest: <code>{{ status.head }}</code>
+            </p>
+            {% for rev in status.revisions %}
+            <div class="db-rev">
+              <span class="db-dot {{ 'applied' if rev.applied else 'pending' }}" title="{{ 'Applied' if rev.applied else 'Pending' }}"></span>
+              <code>{{ rev.revision }}</code>
+              <span class="msg text-truncate">{{ rev.message }}</span>
+              {% if rev.revision == status.current %}<span class="adm-pill adm-pill-accent">current</span>
+              {% elif not rev.applied %}<span class="adm-pill adm-pill-warn">pending</span>{% endif %}
+            </div>
+            {% endfor %}
+            {% if not status.up_to_date %}
+            <form method="post" class="mt-3">
+              <input type="hidden" name="action" value="migrate">
+              <button class="btn btn-primary"><i class="fa-solid fa-play me-2"></i>Run {{ status.pending | length }} pending migration{{ 's' if status.pending | length != 1 }}</button>
+            </form>
+            {% endif %}
+            <p class="db-note mt-3 mb-0">After changing models, create a migration with <code>alembic revision --autogenerate -m "…"</code>; it shows up here as pending.</p>
+          {% else %}
+            <p class="db-note mb-0">Migration status is unavailable while the database can't be reached.</p>
+          {% endif %}
+        </div>
+      </div>
+    </div>
+
+    {# ---------- Switch database ---------- #}
+    <div class="card">
+      <div class="card-header"><h3 class="card-title">Switch database</h3></div>
+      <div class="card-body">
+        {% if pending_url %}
+        <div class="db-alert error" style="background:#fffbeb;color:#92400e">
+          <i class="fa-solid fa-rotate"></i>
+          <span><b>Restart required.</b> <code>.env</code> now points to <code>{{ pending_url }}</code>, but this server is still using the database above until it restarts.
+            <form method="post" class="mt-2">
+              <input type="hidden" name="action" value="cancel-switch">
+              <button class="btn btn-secondary btn-sm">Cancel switch</button>
+            </form>
+          </span>
+        </div>
+        {% endif %}
+
+        {% if switch_blocked %}
+          <div class="db-blocked"><i class="fa-solid fa-lock me-2"></i>{{ switch_blocked }}</div>
+        {% else %}
+        <ol class="db-steps">
+          <li>We test the connection.</li>
+          <li>We create the tables and run all migrations there.</li>
+          <li>We copy your admin account so you can still log in.</li>
+          <li>We save it to <code>.env</code>. <b>Restart the server</b> to switch.</li>
+        </ol>
+        <p class="db-note">Existing data (users, products…) is <b>not</b> copied to the new database.</p>
+
+        <form method="post" id="switch-form" autocomplete="off">
+          <input type="hidden" name="action" value="switch">
+          <div class="db-choices" role="radiogroup" aria-label="Database type">
+            <label class="db-choice"><input type="radio" name="db_mode" value="sqlite" checked> <i class="fa-solid fa-hard-drive"></i> SQLite file</label>
+            <label class="db-choice"><input type="radio" name="db_mode" value="postgres"> <i class="fa-solid fa-server"></i> PostgreSQL</label>
+          </div>
+          <div data-panel="sqlite" class="mb-3">
+            <label class="form-label" for="sqlite_path">Database file</label>
+            <input class="form-control" id="sqlite_path" name="sqlite_path" value="./app.db">
+            <div class="db-note mt-1">Relative to the project folder. Created if it doesn't exist.</div>
+          </div>
+          <div data-panel="postgres" class="mb-3" hidden>
+            <label class="form-label" for="database_url">Connection string</label>
+            <input class="form-control" id="database_url" name="database_url" placeholder="postgresql://user:password@host:5432/dbname" spellcheck="false">
+            <div class="db-note mt-1"><code>postgres://</code> and <code>?sslmode=require</code> URLs are converted automatically.</div>
+          </div>
+
+          <button type="button" class="btn btn-secondary" id="test-btn"><i class="fa-solid fa-plug me-2"></i>Test connection</button>
+          <div class="db-result" id="test-result" role="status"></div>
+
+          <label class="form-check mt-3">
+            <input class="form-check-input" type="checkbox" name="confirm" value="yes" required>
+            <span class="form-check-label">I understand data isn't copied and that I need to restart the server.</span>
+          </label>
+          <button class="btn btn-primary w-100 mt-2" id="switch-btn"><i class="fa-solid fa-right-left me-2"></i>Prepare &amp; switch database</button>
+        </form>
+        {% endif %}
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block tail %}
+<script>
+(function () {
+  var form = document.getElementById("switch-form");
+  if (!form) return;
+  var result = document.getElementById("test-result");
+  function mode() { return form.querySelector('input[name="db_mode"]:checked').value; }
+  function sync() {
+    form.querySelectorAll(".db-choice").forEach(function (c) { c.classList.toggle("is-active", c.querySelector("input").checked); });
+    form.querySelectorAll("[data-panel]").forEach(function (p) { p.hidden = p.dataset.panel !== mode(); });
+    document.getElementById("database_url").required = mode() === "postgres";
+    result.className = "db-result";
+  }
+  form.addEventListener("change", function (e) { if (e.target.name === "db_mode") sync(); });
+  sync();
+
+  function esc(s) { var d = document.createElement("div"); d.textContent = s == null ? "" : String(s); return d.innerHTML; }
+  function show(kind, html) { result.className = "db-result " + kind; result.innerHTML = html; }
+
+  document.getElementById("test-btn").addEventListener("click", function () {
+    var btn = this, data = new FormData(form);
+    data.set("action", "test");
+    btn.disabled = true;
+    show("ok", '<i class="fa-solid fa-spinner fa-spin me-2"></i>Connecting…');
+    fetch(window.location.pathname, { method: "POST", body: data, credentials: "same-origin" })
+      .then(function (r) { return r.json(); })
+      .then(function (d) {
+        if (!d.ok) { show("err", '<i class="fa-solid fa-circle-xmark me-2"></i>' + esc(d.error)); return; }
+        if (d.will_create) { show("ok", '<i class="fa-solid fa-circle-check me-2"></i>A new file will be created at <code>' + esc(d.path) + "</code>."); return; }
+        var head = '<i class="fa-solid fa-circle-check me-2"></i>Connected' + (d.server_version ? " · version " + esc(d.server_version) : "");
+        if (d.app_tables) show("ok", head + "<br>Already has this app's tables" + (d.revision ? " (migration <code>" + esc(d.revision) + "</code>)" : "") + ".");
+        else if (d.tables.length) show("warn", head + "<br>Contains " + d.tables.length + " other table(s): " + esc(d.tables.slice(0, 6).join(", ")) + ". The app's tables will be added alongside them.");
+        else show("ok", head + " · empty database.");
+      })
+      .catch(function () { show("err", "Request failed."); })
+      .finally(function () { btn.disabled = false; });
+  });
+
+  form.addEventListener("submit", function () {
+    var btn = document.getElementById("switch-btn");
+    btn.disabled = true;
+    btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin me-2"></i>Preparing the new database…';
+  });
+})();
+</script>
+{% endblock %}

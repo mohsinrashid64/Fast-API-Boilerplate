@@ -1,0 +1,177 @@
+{#-
+  Admin shell: sidebar + top bar + page header.
+  Replaces sqladmin's layout.html but keeps the blocks its pages rely on
+  (content_header, content, flash, secret_modal).
+-#}
+{% extends "sqladmin/base.html" %}
+
+{% macro nav_link(item) %}
+{% if item.is_visible(request) and item.is_accessible(request) %}
+<a class="adm-nav-link {% if item.is_active(request) %}active{% endif %}" href="{{ item.url(request) }}">
+  <i class="{{ item.icon or 'fa-solid fa-table' }}"></i><span>{{ item.display_name }}</span>
+</a>
+{% endif %}
+{% endmacro %}
+
+{% block body %}
+{%- set index_path = request.url_for('admin:index').path.rstrip('/') -%}
+{%- set path = request.url.path -%}
+{%- set mv = model_view if model_view is defined else none -%}
+{%- set record = model if model is defined else (obj if obj is defined else none) -%}
+{%- if mv and '/create' in path -%}{% set kind = 'create' %}
+{%- elif mv and '/edit/' in path -%}{% set kind = 'edit' %}
+{%- elif mv and '/details/' in path -%}{% set kind = 'details' %}
+{%- elif mv -%}{% set kind = 'list' %}
+{%- elif path.rstrip('/') == index_path -%}{% set kind = 'dashboard' %}
+{%- else -%}{% set kind = 'page' %}
+{%- endif -%}
+{%- set user = request.state.admin_user -%}
+
+<div class="adm-shell adm-kind-{{ kind }}">
+  <aside class="adm-sidebar" id="adm-sidebar">
+    <a class="adm-brand" href="{{ url_for('admin:index') }}">
+      <span class="adm-brand-mark">
+        {% if admin.logo_url %}<img src="{{ admin.logo_url }}" alt="">{% else %}<i class="fa-solid fa-bolt"></i>{% endif %}
+      </span>
+      <span class="adm-brand-text">
+        <strong>Admin</strong>
+        <small title="{{ admin.title }}">{{ admin.title }}</small>
+      </span>
+    </a>
+
+    <nav class="adm-nav" aria-label="Admin navigation">
+      <a class="adm-nav-link {% if kind == 'dashboard' %}active{% endif %}" href="{{ url_for('admin:index') }}">
+        <i class="fa-solid fa-gauge-high"></i><span>Dashboard</span>
+      </a>
+      {% for item in admin._menu.items %}
+        {% if item.type_ == "Category" %}
+          {% if item.is_visible(request) and item.is_accessible(request) %}
+          <div class="adm-nav-section">{{ item.display_name }}</div>
+          {% for child in item.children %}{{ nav_link(child) }}{% endfor %}
+          {% endif %}
+        {% else %}
+          {{ nav_link(item) }}
+        {% endif %}
+      {% endfor %}
+    </nav>
+
+    {% if admin.authentication_backend %}
+    <div class="adm-user">
+      <span class="adm-avatar">{{ (user.username[:2] if user else 'AD') }}</span>
+      <span class="adm-user-text">
+        <strong>{{ user.username if user else 'Administrator' }}</strong>
+        <small>{{ user.email if user else '' }}</small>
+      </span>
+      <a class="adm-icon-btn" href="{{ request.url_for('admin:logout') }}" title="{{ _('Logout') }}" aria-label="{{ _('Logout') }}">
+        <i class="fa-solid fa-arrow-right-from-bracket"></i>
+      </a>
+    </div>
+    {% endif %}
+  </aside>
+  <div class="adm-backdrop" data-adm-close></div>
+
+  <div class="adm-main">
+    {% block topbar scoped %}
+    <header class="adm-topbar">
+      <button type="button" class="adm-menu-toggle" data-adm-toggle aria-controls="adm-sidebar" aria-label="Toggle navigation">
+        <i class="fa-solid fa-bars"></i>
+      </button>
+      <nav class="adm-crumbs" aria-label="Breadcrumb">
+        {% if kind == 'dashboard' %}
+          <span class="current">Dashboard</span>
+        {% else %}
+          <a href="{{ url_for('admin:index') }}">Dashboard</a>
+          {% if mv %}
+            <i class="fa-solid fa-chevron-right sep"></i>
+            {% if kind == 'list' %}
+              <span class="current">{{ mv.name_plural }}</span>
+            {% else %}
+              <a href="{{ url_for('admin:list', identity=mv.identity) }}">{{ mv.name_plural }}</a>
+              <i class="fa-solid fa-chevron-right sep"></i>
+              <span class="current">
+                {%- if kind == 'create' -%}New
+                {%- elif record -%}{{ record }}
+                {%- else -%}{{ kind | capitalize }}{%- endif -%}
+              </span>
+            {% endif %}
+          {% elif title is defined and title %}
+            <i class="fa-solid fa-chevron-right sep"></i><span class="current">{{ title }}</span>
+          {% endif %}
+        {% endif %}
+      </nav>
+      <div class="adm-topbar-end">
+        {% set show_switcher = i18n_config.language_switcher and i18n_config.language_switcher | length > 1 %}
+        {% if show_switcher %}
+        <div class="dropdown">
+          <a href="#" class="adm-topbar-link dropdown-toggle" data-bs-toggle="dropdown" aria-expanded="false">
+            <i class="fa fa-language"></i><span>{{ get_locale_display_name(get_locale()) }}</span>
+          </a>
+          <div class="dropdown-menu dropdown-menu-end">
+            {% for code in i18n_config.language_switcher %}
+            <a class="dropdown-item {% if code == get_locale() %}active{% endif %}"
+              href="{{ request.url.include_query_params(lang=code) }}">{{ get_locale_display_name(code) }}</a>
+            {% endfor %}
+          </div>
+        </div>
+        {% endif %}
+        <a class="adm-topbar-link" href="/docs" target="_blank" rel="noopener">
+          <i class="fa-solid fa-book"></i><span>API docs</span>
+        </a>
+      </div>
+    </header>
+    {% endblock %}
+
+    {% set pending_db = pending_db_switch() %}
+    {% if pending_db %}
+    <div class="adm-restart-banner" role="status">
+      <i class="fa-solid fa-rotate"></i>
+      <span><b>Restart required:</b> the database was changed to <code>{{ pending_db }}</code>. This server keeps using the current one until it restarts.</span>
+      <a href="{{ url_for('admin:view-database') }}">Details</a>
+    </div>
+    {% endif %}
+    <div class="adm-page-header">
+      {% block content_header scoped %}
+        {% if kind == 'dashboard' %}
+          <h1 class="adm-page-title">{% if user %}Welcome back, {{ user.username }}{% else %}Dashboard{% endif %}</h1>
+          <p class="adm-page-subtitle">Here's what's happening in {{ admin.title }}.</p>
+        {% elif kind == 'list' %}
+          <h1 class="adm-page-title">{{ mv.name_plural }}</h1>
+          {% if mv.description %}<p class="adm-page-subtitle">{{ mv.description }}</p>{% endif %}
+        {% elif kind == 'create' %}
+          <h1 class="adm-page-title">New {{ mv.name }}</h1>
+          <p class="adm-page-subtitle">Fill in the details below and save.</p>
+        {% elif kind == 'edit' %}
+          <h1 class="adm-page-title">Edit {{ record if record else mv.name }}</h1>
+          <p class="adm-page-subtitle">{{ mv.name }}{% if record %} #{{ get_object_identifier(record) }}{% endif %}</p>
+        {% elif kind == 'details' %}
+          <h1 class="adm-page-title">{{ record if record else mv.name }}</h1>
+          <p class="adm-page-subtitle">{{ mv.name }}{% if record %} #{{ get_object_identifier(record) }}{% endif %}</p>
+        {% elif title is defined and title %}
+          <h1 class="adm-page-title">{{ title }}</h1>
+          {% if subtitle is defined and subtitle %}<p class="adm-page-subtitle">{{ subtitle }}</p>{% endif %}
+        {% endif %}
+      {% endblock %}
+    </div>
+
+    <div class="adm-content">
+      <div class="row row-deck row-cards">
+        {% block content %}{% endblock %}
+        {% block flash %}{% include 'sqladmin/flash.html' %}{% endblock %}
+        {% block secret_modal %}{% include 'sqladmin/secret_modal.html' %}{% endblock %}
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+  (function () {
+    var body = document.body;
+    document.querySelectorAll('[data-adm-toggle]').forEach(function (el) {
+      el.addEventListener('click', function () { body.classList.toggle('adm-nav-open'); });
+    });
+    document.querySelectorAll('[data-adm-close]').forEach(function (el) {
+      el.addEventListener('click', function () { body.classList.remove('adm-nav-open'); });
+    });
+  })();
+</script>
+{% endblock %}

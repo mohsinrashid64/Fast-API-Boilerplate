@@ -1,116 +1,71 @@
-from datetime import datetime
-from sqlalchemy import select
+import logging
+from typing import Literal
+
+from fastapi import HTTPException, status
+from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
-from fastapi import HTTPException
-from app.models import User, OTP
-from app.utils.otp_util import generate_otp, otp_expiry
+
+from app.models import OTP, User
 from app.utils.email_util import send_email
+from app.utils.otp_util import generate_otp, otp_expiry
 from app.utils.sms_util import send_sms
-from app.utils.crypto_util import decrypt_data
+from app.utils.time import utcnow
+
+logger = logging.getLogger(__name__)
+
+OTP_TTL_MINUTES = 5
 
 
 class OTPService:
     def __init__(self, db: AsyncSession):
         self.db = db
 
-    async def generate_and_send_otp(self, user_id: int, contact: str, contact_type: str = "email"):
-        print("contact_type:", contact_type)
+    async def generate_and_send_otp(
+        self, user: User, otp_type: Literal["email", "phone", "both"] = "email"
+    ) -> dict:
+        """Create a fresh OTP for `user` (replacing any pending ones) and deliver it."""
+        if otp_type in ("phone", "both") and not user.phone_number:
+            raise HTTPException(status_code=400, detail="User has no phone number on file")
 
-        # Step 1: Validate input
-        if not user_id or not isinstance(user_id, int):
-            raise HTTPException(status_code=400, detail="Invalid user_id")
-        if not contact or not isinstance(contact, str):
-            raise HTTPException(status_code=400, detail="Invalid contact information")
-        if contact_type not in ["email", "phone"]:
-            raise HTTPException(status_code=400, detail="Invalid contact type")
+        # Replace any pending (unverified) OTPs so only the newest code is valid.
+        await self.db.execute(delete(OTP).where(OTP.user_id == user.id, OTP.verified.is_(False)))
 
-        # Step 2: Check for existing unexpired OTP for the user
-        stmt = (
-            select(OTP)
-            .where(OTP.user_id == user_id)
-            .where(OTP.expires_at > datetime.utcnow())
-        )
-        result = await self.db.execute(stmt)
-        existing_otp = result.scalar_one_or_none()
-
-        if existing_otp:
-            raise HTTPException(status_code=400, detail="An unexpired OTP already exists for this user")
-
-        # Step 3: Generate OTP and expiry time
         otp_code = generate_otp()
-        expires_at = otp_expiry()
+        expires_at = otp_expiry(OTP_TTL_MINUTES)
+        self.db.add(OTP(user_id=user.id, otp_code=otp_code, expires_at=expires_at))
+        await self.db.commit()
 
-        # Step 4: Add OTP to the database
-        otp_entry = OTP(user_id=user_id, otp_code=otp_code, expires_at=expires_at)
-        self.db.add(otp_entry)
-
+        message = f"Your OTP code is: {otp_code}. It will expire in {OTP_TTL_MINUTES} minutes."
         try:
-            await self.db.commit()
-            await self.db.refresh(otp_entry)
-        except Exception as e:
-            await self.db.rollback()
-            raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
-
-        # Step 5: Send OTP (non-blocking if possible)
-        try:
-            if contact_type == "email":
-                # If send_email is blocking, run it in thread pool
-                await send_email(
-                    to=contact,
-                    subject="Your OTP Code",
-                    body=f"Your OTP code is: {otp_code}. It will expire in 5 minutes.",
-                )
-            elif contact_type == "phone":
-                await send_sms(
-                    to=contact,
-                    message=f"Your OTP code is: {otp_code}. It will expire in 5 minutes.",
-                )
-        except Exception as e:
-            await self.db.rollback()
-            raise HTTPException(status_code=500, detail=f"Failed to send OTP: {str(e)}")
+            if otp_type in ("email", "both"):
+                await send_email(to=user.email, subject="Your OTP Code", body=message)
+            if otp_type in ("phone", "both"):
+                await send_sms(to=user.phone_number, message=message)
+        except Exception as exc:
+            logger.exception("Failed to deliver OTP to user %s", user.id)
+            raise HTTPException(
+                status_code=status.HTTP_502_BAD_GATEWAY, detail="Failed to send OTP, please try again"
+            ) from exc
 
         return {"message": "OTP sent successfully", "expires_at": expires_at}
 
-###
-
-    async def verify_otp(self, encrypted_user_id: str, otp_code: str):
-        # Step 1: Decrypt and validate user ID
-        try:
-            user_id = int(decrypt_data(encrypted_user_id))
-            print("USER ID", user_id)
-        except Exception:
-            raise HTTPException(status_code=400, detail="Invalid user ID")
-
-        # Step 2: Find OTP entry
-        stmt = select(OTP).where(OTP.user_id == user_id, OTP.otp_code == otp_code)
-        result = await self.db.execute(stmt)
-        otp_entry = result.scalar_one_or_none()
+    async def verify_otp(self, user_id: int, otp_code: str) -> dict:
+        stmt = (
+            select(OTP)
+            .where(OTP.user_id == user_id, OTP.otp_code == otp_code, OTP.verified.is_(False))
+            .order_by(OTP.id.desc())
+        )
+        otp_entry = (await self.db.execute(stmt)).scalars().first()
 
         if not otp_entry:
             raise HTTPException(status_code=400, detail="Invalid OTP")
-
-        # Step 3: Check expiration
-        if otp_entry.expires_at < datetime.utcnow():
+        if otp_entry.expires_at < utcnow():
             raise HTTPException(status_code=400, detail="OTP has expired")
 
-        # Step 4: Mark OTP as verified
         otp_entry.verified = True
-        self.db.add(otp_entry)
-
-        # Step 5: Mark user as verified (if exists)
-        user_stmt = select(User).where(User.id == user_id)
-        user_result = await self.db.execute(user_stmt)
-        user = user_result.scalar_one_or_none()
-
+        user = await self.db.get(User, user_id)
         if user:
             user.is_verified = True
-            self.db.add(user)
-
-        # Step 6: Commit all updates safely
-        try:
-            await self.db.commit()
-        except Exception as e:
-            await self.db.rollback()
-            raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
+        await self.db.commit()
 
         return {"message": "OTP verified successfully"}

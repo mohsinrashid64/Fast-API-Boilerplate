@@ -1,0 +1,124 @@
+{% extends "sqladmin/layout.html" %}
+
+{% macro initials(name) %}{{ name[:2] }}{% endmacro %}
+
+{% block content %}
+<div class="col-12 adm-dashboard">
+  <section class="adm-stats" aria-label="Key figures">
+    <a class="adm-stat" href="{{ url_for('admin:list', identity='user') }}">
+      <div class="adm-stat-top">
+        <span class="adm-stat-label">Users</span>
+        <span class="adm-stat-icon adm-tone-indigo"><i class="fa-solid fa-users"></i></span>
+      </div>
+      <div class="adm-stat-value">{{ "{:,}".format(stats.users) }}</div>
+      <div class="adm-stat-foot">
+        {% if stats.new_users %}<span class="text-success fw-medium">+{{ stats.new_users }}</span> in the last 7 days
+        {% else %}No new sign-ups this week{% endif %}
+      </div>
+    </a>
+
+    <a class="adm-stat" href="{{ url_for('admin:list', identity='user') }}?is_verified=true">
+      <div class="adm-stat-top">
+        <span class="adm-stat-label">Verified accounts</span>
+        <span class="adm-stat-icon adm-tone-green"><i class="fa-solid fa-circle-check"></i></span>
+      </div>
+      <div class="adm-stat-value">{{ stats.verified_pct }}%</div>
+      <div class="adm-progress" aria-hidden="true"><span style="width: {{ stats.verified_pct }}%"></span></div>
+      <div class="adm-stat-foot">{{ stats.verified }} of {{ stats.users }} accounts</div>
+    </a>
+
+    <a class="adm-stat" href="{{ url_for('admin:list', identity='product') }}">
+      <div class="adm-stat-top">
+        <span class="adm-stat-label">Products</span>
+        <span class="adm-stat-icon adm-tone-sky"><i class="fa-solid fa-box"></i></span>
+      </div>
+      <div class="adm-stat-value">{{ "{:,}".format(stats.products) }}</div>
+      <div class="adm-stat-foot">{{ "{:,}".format(stats.units) }} units in stock</div>
+    </a>
+
+    <a class="adm-stat" href="{{ url_for('admin:list', identity='product') }}?sortBy=stock&sort=asc">
+      <div class="adm-stat-top">
+        <span class="adm-stat-label">Low stock</span>
+        <span class="adm-stat-icon adm-tone-amber"><i class="fa-solid fa-triangle-exclamation"></i></span>
+      </div>
+      <div class="adm-stat-value">{{ stats.low_stock }}</div>
+      <div class="adm-stat-foot">Products with fewer than {{ low_stock_threshold }} units</div>
+    </a>
+  </section>
+
+  <section class="adm-panels">
+    <div class="card adm-panel">
+      <div class="card-header">
+        <h3 class="card-title">Newest users</h3>
+        <a href="{{ url_for('admin:create', identity='user') }}" class="btn btn-primary">
+          <i class="fa-solid fa-plus me-1"></i> Add user
+        </a>
+      </div>
+      {% if recent_users %}
+      <div class="table-responsive">
+        <table class="table card-table table-vcenter">
+          <thead><tr><th>User</th><th>Status</th><th class="text-end">Joined</th></tr></thead>
+          <tbody>
+          {% for u in recent_users %}
+            <tr>
+              <td>
+                <a class="adm-row-title" href="{{ url_for('admin:details', identity='user', pk=u.id) }}">
+                  <span class="adm-avatar">{{ initials(u.username) }}</span>
+                  <span class="text-truncate">{{ u.username }}<span class="adm-row-sub text-truncate">{{ u.email }}</span></span>
+                </a>
+              </td>
+              <td>
+                {% if not u.is_active %}<span class="adm-pill adm-pill-danger">Inactive</span>
+                {% elif u.is_superuser %}<span class="adm-pill adm-pill-accent">Superuser</span>
+                {% elif u.is_verified %}<span class="adm-pill adm-pill-yes">Verified</span>
+                {% else %}<span class="adm-pill adm-pill-warn">Unverified</span>{% endif %}
+              </td>
+              <td class="text-end adm-date">{{ u.created_at.strftime('%b %d, %Y') if u.created_at else '' }}</td>
+            </tr>
+          {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      <div class="adm-panel-foot"><a href="{{ url_for('admin:list', identity='user') }}">View all users <i class="fa-solid fa-arrow-right ms-1"></i></a></div>
+      {% else %}
+      <div class="adm-empty">No users yet.</div>
+      {% endif %}
+    </div>
+
+    <div class="card adm-panel">
+      <div class="card-header">
+        <h3 class="card-title">Newest products</h3>
+        <a href="{{ url_for('admin:create', identity='product') }}" class="btn btn-primary">
+          <i class="fa-solid fa-plus me-1"></i> Add product
+        </a>
+      </div>
+      {% if recent_products %}
+      <div class="table-responsive">
+        <table class="table card-table table-vcenter">
+          <thead><tr><th>Product</th><th class="text-end">Price</th><th class="text-end">Stock</th></tr></thead>
+          <tbody>
+          {% for p in recent_products %}
+            <tr>
+              <td>
+                <a class="d-block text-truncate" href="{{ url_for('admin:details', identity='product', pk=p.id) }}">{{ p.name }}</a>
+                <span class="adm-row-sub">by {{ p.user.username if p.user else '—' }}</span>
+              </td>
+              <td class="text-end adm-num">{{ "{:,.2f}".format(p.price) }}</td>
+              <td class="text-end">
+                {% if (p.stock or 0) == 0 %}<span class="adm-pill adm-pill-danger">Out of stock</span>
+                {% elif p.stock < low_stock_threshold %}<span class="adm-pill adm-pill-warn">{{ p.stock }} left</span>
+                {% else %}<span class="adm-num">{{ p.stock }}</span>{% endif %}
+              </td>
+            </tr>
+          {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      <div class="adm-panel-foot"><a href="{{ url_for('admin:list', identity='product') }}">View all products <i class="fa-solid fa-arrow-right ms-1"></i></a></div>
+      {% else %}
+      <div class="adm-empty">No products yet.</div>
+      {% endif %}
+    </div>
+  </section>
+</div>
+{% endblock %}

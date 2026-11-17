@@ -1,6 +1,8 @@
-from sqlalchemy import Column, Integer, String, Float, Text, DateTime, ForeignKey, func
+from sqlalchemy import Column, DateTime, Float, ForeignKey, Integer, String, Text, func
 from sqlalchemy.orm import relationship
+
 from app.database.db_config import Base
+
 
 class Product(Base):
     __tablename__ = "products"
@@ -13,6 +15,8 @@ class Product(Base):
     created_at = Column(DateTime, default=func.now())
     updated_at = Column(DateTime, default=func.now(), onupdate=func.now())
 
-    # Relationship with User (one-to-many)
     user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
     user = relationship("User", back_populates="products")
+
+    def __str__(self) -> str:
+        return self.name

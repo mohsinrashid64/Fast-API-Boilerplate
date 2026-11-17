@@ -1,40 +1,22 @@
-from pydantic import BaseModel, EmailStr, model_validator
-from typing import Optional
+from datetime import datetime
 
-from app.utils.crypto_util import decrypt_data, encrypt_data
+from pydantic import BaseModel, ConfigDict, EmailStr
+
 
 class UserBase(BaseModel):
     username: str
     email: EmailStr
-    phone_number: Optional[str] = None
+    phone_number: str | None = None
 
 
 class UserResponse(BaseModel):
-    id: int  # The encrypted ID sent to the client as a string
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
     username: str
     email: str
-    phone_number: Optional[str]
+    phone_number: str | None
     is_verified: bool
-
-    class Config:
-        from_attributes = True  # ✅ allow parsing ORM objects
-
-    # # Automatically encrypt user_id before sending the response
-    # @model_validator(mode="before")
-    # def encrypt_user_id(cls, values):
-    #     if "id" in values:
-    #         print('VALUES',values)
-
-    #         # Encrypt the integer ID and convert to string
-    #         values["id"] = encrypt_data(values["id"])  # Assumed encryption returns a string
-    #         print('XXXXX',type(values["id"]))
-
-    #     return values
-
-    # # Decrypt user_id when receiving data from frontend
-    # @model_validator(mode="after")
-    # def decrypt_user_id(cls, values):
-    #     if "id" in values:
-    #         # Decrypt the ID (it's a string here, converting back to integer as needed)
-    #         values["id"] = decrypt_data(values["id"])  # Assumed decryption returns an integer
-    #     return values
+    is_active: bool
+    is_superuser: bool
+    created_at: datetime | None = None

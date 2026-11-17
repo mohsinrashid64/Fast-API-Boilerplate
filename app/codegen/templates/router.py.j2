@@ -1,0 +1,82 @@
+{{ header }}
+from fastapi import APIRouter, Depends, Query, status
+from sqlalchemy.ext.asyncio import AsyncSession
+
+{% if r.require_auth %}
+from app.core.deps import get_current_user
+{% endif %}
+from app.crud.{{ r.module }}_crud import {{ r.module }}_crud
+from app.database import get_db
+{% if r.owner_scoped %}
+from app.models import User
+{% endif %}
+from app.schemas.{{ r.module }} import {{ r.class_name }}Create, {{ r.class_name }}Out, {{ r.class_name }}Update
+
+{% if r.require_auth and not r.owner_scoped %}
+# Every endpoint requires a logged-in user.
+router = APIRouter(prefix="/{{ r.url }}", tags=["{{ r.tag }}"], dependencies=[Depends(get_current_user)])
+{% else %}
+router = APIRouter(prefix="/{{ r.url }}", tags=["{{ r.tag }}"])
+{% endif %}
+{% if r.owner_scoped %}
+
+# Every endpoint is scoped to the current user: other users' records are 404.
+{% endif %}
+{% set user_arg = ",\n    current_user: User = Depends(get_current_user)," if r.owner_scoped else "," %}
+{% set scope = ", user_id=current_user.id" if r.owner_scoped else "" %}
+
+
+@router.post("/", response_model={{ r.class_name }}Out, status_code=status.HTTP_201_CREATED)
+async def create_{{ r.module }}(
+    item_in: {{ r.class_name }}Create,
+    db: AsyncSession = Depends(get_db){{ user_arg }}
+):
+    return await {{ r.module }}_crud.create(db, obj_in=item_in{{ scope }})
+
+
+@router.get("/", response_model=list[{{ r.class_name }}Out])
+async def list_{{ r.table_name }}(
+    skip: int = Query(0, ge=0),
+    limit: int = Query(20, ge=1, le=100),
+    db: AsyncSession = Depends(get_db){{ user_arg }}
+):
+    return await {{ r.module }}_crud.get_all(db, skip=skip, limit=limit{{ scope }})
+
+
+@router.get("/{item_id}", response_model={{ r.class_name }}Out)
+async def get_{{ r.module }}(
+    item_id: int,
+    db: AsyncSession = Depends(get_db){{ user_arg }}
+):
+    return await {{ r.module }}_crud.get(db, id=item_id{{ scope }})
+
+
+@router.put("/{item_id}", response_model={{ r.class_name }}Out)
+async def replace_{{ r.module }}(
+    item_id: int,
+    item_in: {{ r.class_name }}Create,
+    db: AsyncSession = Depends(get_db){{ user_arg }}
+):
+    """Full update: required fields must be sent."""
+    item = await {{ r.module }}_crud.get(db, id=item_id{{ scope }})
+    return await {{ r.module }}_crud.update(db, db_obj=item, obj_in=item_in.model_dump(exclude_unset=True))
+
+
+@router.patch("/{item_id}", response_model={{ r.class_name }}Out)
+async def update_{{ r.module }}(
+    item_id: int,
+    item_in: {{ r.class_name }}Update,
+    db: AsyncSession = Depends(get_db){{ user_arg }}
+):
+    """Partial update: only the fields sent are changed."""
+    item = await {{ r.module }}_crud.get(db, id=item_id{{ scope }})
+    return await {{ r.module }}_crud.update(db, db_obj=item, obj_in=item_in)
+
+
+@router.delete("/{item_id}")
+async def delete_{{ r.module }}(
+    item_id: int,
+    db: AsyncSession = Depends(get_db){{ user_arg }}
+):
+    await {{ r.module }}_crud.delete(db, id=item_id{{ scope }})
+    return {"detail": "{{ r.class_name }} deleted successfully"}

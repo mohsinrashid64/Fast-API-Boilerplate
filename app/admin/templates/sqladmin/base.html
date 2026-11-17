@@ -1,0 +1,37 @@
+{#- Extends sqladmin's own base.html (assets, scripts) and layers the admin theme on top. -#}
+{% extends "sqladmin_original/base.html" %}
+{% block head_css %}
+{{ super() }}
+<style>
+{% include "admin_theme.css" %}
+</style>
+{% endblock %}
+
+{% block tail_js %}
+{{ super() }}
+<script>
+  // Relationship pickers: show records as soon as they open, search as you type, load more on scroll.
+  $(':input[data-role="select2-ajax"]').each(function () {
+    var $select = $(this);
+    if ($select.data("select2")) $select.select2("destroy");
+    $select.select2({
+      minimumInputLength: 0,
+      placeholder: $select.attr("placeholder") || "Select…",
+      allowClear: !!$select.data("allowBlank") && !$select.prop("multiple"),
+      width: "100%",
+      ajax: {
+        url: $select.data("url"),
+        dataType: "json",
+        delay: 200,
+        cache: true,
+        data: function (params) {
+          return { name: $select.attr("name"), term: params.term || "", page: params.page || 1 };
+        },
+        processResults: function (data) {
+          return { results: data.results, pagination: { more: !!(data.pagination && data.pagination.more) } };
+        }
+      }
+    });
+  });
+</script>
+{% endblock %}

@@ -1,0 +1,1457 @@
+{% extends "sqladmin/layout.html" %}
+
+{% block head %}
+<style>
+  .erd-wrap {
+    position: relative;
+    width: 100%;
+    flex: 1 1 auto;
+    height: calc(100vh - 210px);
+    min-height: 520px;
+    border: 1px solid var(--adm-border);
+    border-radius: var(--adm-radius);
+    background-color: #fbfbfd;
+    background-image: radial-gradient(#d9dce6 1px, transparent 1px);
+    background-size: 22px 22px;
+    overflow: hidden;
+    box-shadow: var(--adm-shadow);
+    user-select: none;
+    touch-action: none;
+  }
+  .erd-viewport { position: absolute; inset: 0; cursor: grab; }
+  .erd-viewport.is-panning { cursor: grabbing; }
+  .erd-world { position: absolute; left: 0; top: 0; transform-origin: 0 0; }
+  .erd-edges { position: absolute; left: 0; top: 0; width: 1px; height: 1px; overflow: visible; }
+
+  /* Edges */
+  .erd-edge path.line { fill: none; stroke: #a5adc2; stroke-width: 1.6; transition: stroke .15s, opacity .15s; }
+  .erd-edge .notation { stroke: #a5adc2; stroke-width: 1.6; fill: none; transition: stroke .15s; }
+  .erd-edge .notation circle { fill: #fbfbfd; }
+  .erd-edge path.hit { fill: none; stroke: transparent; stroke-width: 14; cursor: help; }
+  .erd-edge.hl path.line, .erd-edge.hl .notation { stroke: var(--adm-accent); }
+  .erd-edge.hl path.line { stroke-width: 2.2; }
+  .erd-dim .erd-edge:not(.hl) { opacity: .18; }
+
+  /* Table cards */
+  .erd-table {
+    position: absolute;
+    min-width: 260px;
+    background: #fff;
+    border: 1px solid #dde1ea;
+    border-radius: 10px;
+    box-shadow: 0 1px 2px rgba(15,23,42,.05), 0 4px 14px rgba(15,23,42,.06);
+    font-size: 13px;
+    transition: box-shadow .15s, border-color .15s, opacity .15s;
+    outline: none;
+  }
+  .erd-table:hover { box-shadow: 0 2px 4px rgba(15,23,42,.06), 0 10px 24px rgba(15,23,42,.10); }
+  .erd-table.is-selected { border-color: var(--adm-accent); box-shadow: 0 0 0 3px rgba(var(--adm-accent-rgb), .18), 0 10px 24px rgba(15,23,42,.10); }
+  .erd-table.is-dragging { box-shadow: 0 16px 40px rgba(15,23,42,.18); z-index: 5; }
+  .erd-table:focus-visible { border-color: var(--adm-accent); }
+  .erd-dim .erd-table:not(.hl) { opacity: .35; }
+  .erd-table.no-match { opacity: .25; }
+
+  .erd-head {
+    display: flex; align-items: center; gap: 10px;
+    padding: 10px 12px;
+    border-bottom: 1px solid #eceef4;
+    border-radius: 10px 10px 0 0;
+    background: linear-gradient(#fff, #f8f9fc);
+    cursor: move;
+  }
+  .erd-head-icon {
+    flex: 0 0 26px; height: 26px; border-radius: 7px; display: grid; place-items: center;
+    background: var(--adm-accent-soft); color: var(--adm-accent); font-size: 12px;
+  }
+  .erd-head-text { min-width: 0; flex: 1; line-height: 1.2; }
+  .erd-head-text strong { display: block; font-weight: 600; color: var(--adm-text); }
+  .erd-head-text small { display: block; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11.5px; color: var(--adm-muted); }
+  .erd-count { font-size: 11.5px; color: var(--adm-muted); background: #f1f3f8; border-radius: 999px; padding: 2px 8px; white-space: nowrap; font-variant-numeric: tabular-nums; }
+
+  .erd-cols { padding: 4px 0; }
+  .erd-col { display: flex; align-items: center; gap: 8px; height: 28px; padding: 0 12px; }
+  .erd-col:hover, .erd-col.hl { background: #f5f6fe; }
+  .erd-col-icon { flex: 0 0 14px; text-align: center; font-size: 11px; color: #c0c6d4; }
+  .erd-col-icon.pk { color: #d97706; }
+  .erd-col-icon.fk { color: var(--adm-accent); }
+  .erd-col-icon.uq { color: #0891b2; }
+  .erd-col-name { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: #1e293b; }
+  .erd-col-name.pk { font-weight: 600; }
+  .erd-col-name .opt { color: #94a3b8; }
+  .erd-col-type { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11.5px; color: #8a93a8; white-space: nowrap; }
+  .erd-col.match .erd-col-name { background: #fef3c7; border-radius: 3px; }
+
+  /* Toolbar & legend */
+  .erd-toolbar {
+    position: absolute; top: 12px; left: 12px; z-index: 10;
+    display: flex; align-items: center; gap: 6px; flex-wrap: wrap;
+    padding: 6px; background: rgba(255,255,255,.95); border: 1px solid var(--adm-border);
+    border-radius: 10px; box-shadow: var(--adm-shadow);
+  }
+  .erd-toolbar .sep { width: 1px; height: 22px; background: var(--adm-border); margin: 0 2px; }
+  .erd-btn {
+    height: 32px; min-width: 32px; padding: 0 9px; border: 0; border-radius: 7px; background: transparent;
+    color: #334155; font-size: 13px; font-weight: 500; display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+  }
+  .erd-btn:hover { background: #f1f3f8; color: var(--adm-text); }
+  .erd-zoom { min-width: 48px; font-variant-numeric: tabular-nums; font-size: 12.5px; color: var(--adm-muted); text-align: center; }
+  .erd-search { position: relative; }
+  .erd-search input {
+    height: 32px; width: 200px; padding: 0 10px 0 30px; border: 1px solid #e2e5ee; border-radius: 7px;
+    font-size: 13px; outline: none; background: #fff;
+  }
+  .erd-search input:focus { border-color: rgba(var(--adm-accent-rgb), .6); box-shadow: 0 0 0 3px rgba(var(--adm-accent-rgb), .15); }
+  .erd-search i { position: absolute; left: 10px; top: 50%; transform: translateY(-50%); color: #94a3b8; font-size: 12px; }
+
+  .erd-legend {
+    position: absolute; left: 12px; bottom: 12px; z-index: 10;
+    display: flex; gap: 14px; flex-wrap: wrap; align-items: center;
+    padding: 8px 12px; background: rgba(255,255,255,.95); border: 1px solid var(--adm-border);
+    border-radius: 10px; font-size: 12px; color: var(--adm-muted); box-shadow: var(--adm-shadow);
+  }
+  .erd-legend span { display: inline-flex; align-items: center; gap: 6px; }
+  .erd-legend .pk { color: #d97706; } .erd-legend .fk { color: var(--adm-accent); } .erd-legend .uq { color: #0891b2; }
+  .erd-legend svg { stroke: #8a93a8; stroke-width: 1.5; fill: none; }
+
+  .erd-hint { position: absolute; right: 16px; top: 22px; z-index: 9; font-size: 12px; color: #94a3b8; pointer-events: none; }
+  @media (max-width: 1279.98px) { .erd-hint { display: none; } }
+
+  .erd-tooltip {
+    position: absolute; z-index: 30; pointer-events: none; display: none;
+    max-width: 320px; padding: 8px 10px; border-radius: 8px;
+    background: #0f172a; color: #e2e8f0; font-size: 12px; line-height: 1.45; box-shadow: 0 8px 24px rgba(15,23,42,.25);
+  }
+  .erd-tooltip code { color: #c7d2fe; background: none; padding: 0; font-size: 12px; }
+
+  /* Details drawer */
+  .erd-drawer {
+    position: absolute; top: 0; right: 0; bottom: 0; z-index: 20;
+    width: 400px; max-width: 100%;
+    background: #fff; border-left: 1px solid var(--adm-border);
+    box-shadow: -12px 0 32px rgba(15,23,42,.08);
+    transform: translateX(105%); transition: transform .2s ease;
+    display: flex; flex-direction: column; user-select: text;
+  }
+  .erd-drawer.open { transform: none; }
+  .erd-drawer-head { display: flex; gap: 12px; align-items: flex-start; padding: 16px 18px; border-bottom: 1px solid var(--adm-border); }
+  .erd-drawer-head h3 { margin: 0; font-size: 17px; font-weight: 650; }
+  .erd-drawer-head .sub { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; color: var(--adm-muted); }
+  .erd-drawer-body { overflow-y: auto; padding: 4px 18px 24px; }
+  .erd-drawer h4 { margin: 20px 0 8px; font-size: 11.5px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: var(--adm-muted); }
+  .erd-stats { display: flex; gap: 8px; margin-top: 14px; flex-wrap: wrap; }
+  .erd-stat { flex: 1; min-width: 90px; padding: 8px 10px; border: 1px solid var(--adm-border); border-radius: 8px; }
+  .erd-stat b { display: block; font-size: 17px; font-variant-numeric: tabular-nums; }
+  .erd-stat span { font-size: 12px; color: var(--adm-muted); }
+  .erd-dcol { padding: 9px 0; border-bottom: 1px solid #f0f2f6; }
+  .erd-dcol:last-child { border-bottom: 0; }
+  .erd-dcol-top { display: flex; align-items: baseline; gap: 8px; }
+  .erd-dcol-top b { font-weight: 600; font-size: 13.5px; }
+  .erd-dcol-top code { margin-left: auto; font-size: 12px; color: #64748b; background: #f4f5f9; padding: 1px 6px; border-radius: 5px; }
+  .erd-chips { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 5px; }
+  .erd-chip { font-size: 11px; font-weight: 500; padding: 1px 7px; border-radius: 999px; background: #f1f3f8; color: #475569; }
+  .erd-chip.pk { background: #fffbeb; color: #b45309; }
+  .erd-chip.fk { background: var(--adm-accent-soft); color: var(--adm-accent-dark); cursor: pointer; }
+  .erd-chip.uq { background: #ecfeff; color: #0e7490; }
+  .erd-chip.nn { background: #f1f5f9; color: #334155; }
+  .erd-chip.null { background: #fff; color: #94a3b8; border: 1px dashed #d5d9e4; }
+  .erd-chip.def { background: #f0fdf4; color: #15803d; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+  .erd-list-item { padding: 8px 10px; border: 1px solid var(--adm-border); border-radius: 8px; margin-bottom: 6px; font-size: 13px; }
+  .erd-list-item .meta { display: block; margin-top: 2px; font-size: 12px; color: var(--adm-muted); }
+  .erd-list-item a { cursor: pointer; }
+  .erd-empty-note { font-size: 13px; color: #94a3b8; }
+
+  /* ---------- Table builder (modal) ---------- */
+  .erd-btn-primary { background: var(--adm-accent); color: #fff; }
+  .erd-btn-primary:hover { background: var(--adm-accent-dark); color: #fff; }
+
+  .tb-overlay {
+    position: fixed; inset: 0; z-index: 1060;
+    display: grid; place-items: center; padding: 24px;
+    background: rgba(15, 23, 42, .45); backdrop-filter: blur(3px);
+    opacity: 0; visibility: hidden; transition: opacity .18s ease, visibility .18s;
+  }
+  .tb-overlay.open { opacity: 1; visibility: visible; }
+  .tb-modal {
+    width: min(1180px, 100%); height: min(860px, calc(100vh - 48px));
+    display: flex; flex-direction: column; overflow: hidden;
+    background: var(--adm-bg); border-radius: 16px;
+    box-shadow: 0 24px 64px rgba(15, 23, 42, .28);
+    transform: translateY(12px) scale(.985); transition: transform .2s ease;
+  }
+  .tb-overlay.open .tb-modal { transform: none; }
+
+  /* header */
+  .tb-head { display: flex; align-items: center; gap: 14px; padding: 16px 20px; background: #fff; border-bottom: 1px solid var(--adm-border); }
+  .tb-head-icon { flex: 0 0 40px; height: 40px; border-radius: 11px; display: grid; place-items: center; background: var(--adm-accent-soft); color: var(--adm-accent); font-size: 17px; }
+  .tb-head-text { min-width: 0; flex: 1; }
+  .tb-head-text h3 { margin: 0; font-size: 17px; font-weight: 650; }
+  .tb-head-text p { margin: 2px 0 0; font-size: 13px; color: var(--adm-muted); }
+  .tb-steps { display: flex; align-items: center; gap: 8px; font-size: 12.5px; color: #94a3b8; white-space: nowrap; }
+  .tb-steps span { display: inline-flex; align-items: center; gap: 6px; }
+  .tb-steps b { width: 20px; height: 20px; border-radius: 50%; display: grid; place-items: center; background: #eef0f5; color: #64748b; font-size: 11px; }
+  .tb-steps span.active { color: var(--adm-text); font-weight: 600; }
+  .tb-steps span.active b { background: var(--adm-accent); color: #fff; }
+  .tb-steps span.done b { background: #dcfce7; color: #16a34a; }
+  .tb-steps i { width: 18px; height: 1px; background: #d5d9e4; }
+  .tb-close { flex: 0 0 36px; height: 36px; border: 0; border-radius: 9px; background: transparent; color: #64748b; }
+  .tb-close:hover { background: #f1f3f8; color: var(--adm-text); }
+
+  /* body: form + live preview */
+  .tb-main { flex: 1; min-height: 0; display: grid; grid-template-columns: minmax(0, 1fr) 340px; }
+  .tb-main[hidden] { display: none; }
+  .tb-form { overflow-y: auto; padding: 20px 20px 28px; display: grid; gap: 14px; align-content: start; }
+  .tb-side { overflow-y: auto; padding: 20px; border-left: 1px solid var(--adm-border); background: #fff; }
+
+  .tb-card { background: #fff; border: 1px solid var(--adm-border); border-radius: 12px; padding: 16px 18px 18px; }
+  .tb-card-head { display: flex; gap: 12px; align-items: flex-start; margin-bottom: 14px; }
+  .tb-num { flex: 0 0 26px; height: 26px; border-radius: 50%; display: grid; place-items: center; background: var(--adm-accent-soft); color: var(--adm-accent-dark); font-size: 12.5px; font-weight: 700; }
+  .tb-card-head h4 { margin: 2px 0 0; font-size: 15px; font-weight: 650; color: var(--adm-text); }
+  .tb-card-head p { margin: 2px 0 0; font-size: 13px; color: var(--adm-muted); }
+  .tb-card-head code { font-size: 12px; }
+  .tb-optional { margin-left: 6px; font-size: 11px; font-weight: 500; color: #94a3b8; background: #f1f3f8; border-radius: 999px; padding: 1px 7px; vertical-align: 2px; }
+
+  .tb-grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+  .tb-field > span { display: block; font-size: 13px; font-weight: 500; color: #334155; margin-bottom: 5px; }
+  .tb-field small { display: block; margin-top: 5px; font-size: 12px; color: var(--adm-muted); }
+  .tb-field small code { font-size: 11.5px; }
+
+  .tb .form-control, .tb .form-select { height: 36px; font-size: 13.5px; }
+  .tb-mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 13px !important; }
+
+  /* columns & relations */
+  .tb-list { display: grid; gap: 8px; }
+  .tb-list:empty { display: none; }
+  .tb-item { border: 1px solid #e6e9f1; border-radius: 10px; padding: 10px 10px 10px 12px; background: #fcfcfe; transition: border-color .15s, box-shadow .15s; }
+  .tb-item:focus-within { border-color: rgba(var(--adm-accent-rgb), .45); box-shadow: 0 0 0 3px rgba(var(--adm-accent-rgb), .08); background: #fff; }
+  .tb-line { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+  .tb-line + .tb-line { margin-top: 8px; }
+  .tb-in-name { flex: 1 1 180px; min-width: 140px; }
+  .tb-in-type { flex: 0 0 140px; }
+  .tb-in-default { flex: 1 1 140px; min-width: 110px; }
+  .tb-in-target { flex: 1 1 200px; min-width: 160px; }
+  .tb-in-ondelete { flex: 0 1 220px; min-width: 170px; }
+  .tb-size { display: inline-flex; align-items: center; gap: 5px; font-size: 12.5px; color: var(--adm-muted); }
+  .tb-size:empty { display: none; }
+  .tb-size .form-control { width: 70px; padding: 4px 8px; }
+  .tb-word { font-size: 13px; color: var(--adm-muted); white-space: nowrap; }
+  .tb-hint { margin-left: auto; font-size: 12px; color: #94a3b8; }
+
+  .tb-pill { position: relative; display: inline-flex; margin: 0; cursor: pointer; user-select: none; }
+  .tb-pill input { position: absolute; opacity: 0; width: 1px; height: 1px; }
+  .tb-pill span {
+    display: inline-flex; align-items: center; gap: 6px; padding: 4px 11px; border-radius: 999px;
+    border: 1px solid #dfe3ec; background: #fff; color: #475569; font-size: 12.5px; font-weight: 500;
+    transition: background .12s, border-color .12s, color .12s;
+  }
+  .tb-pill span i { font-size: 11px; opacity: .55; }
+  .tb-pill:hover span { border-color: #c9cfdd; }
+  .tb-pill input:checked + span { background: var(--adm-accent-soft); border-color: rgba(var(--adm-accent-rgb), .45); color: var(--adm-accent-dark); }
+  .tb-pill input:checked + span i { opacity: 1; }
+  .tb-pill input:focus-visible + span { box-shadow: 0 0 0 3px rgba(var(--adm-accent-rgb), .2); }
+
+  .tb-x { flex: 0 0 34px; height: 34px; border: 0; border-radius: 8px; background: none; color: #a3acbf; }
+  .tb-x:hover { background: #fef2f2; color: #dc2626; }
+
+  .tb-add {
+    width: 100%; margin-top: 10px; padding: 9px; border: 1.5px dashed #cfd5e3; border-radius: 10px;
+    background: transparent; color: #475569; font-size: 13.5px; font-weight: 500;
+    display: flex; align-items: center; justify-content: center; gap: 8px;
+  }
+  .tb-add:hover { border-color: var(--adm-accent); color: var(--adm-accent); background: #fafaff; }
+  .tb-fixed { display: flex; align-items: center; gap: 10px; padding: 8px 12px; margin-bottom: 8px; border-radius: 10px; background: #f6f7fb; font-size: 13px; color: #64748b; }
+  .tb-fixed .fa-key { color: #d97706; }
+  .tb-fixed code { color: #334155; }
+
+  /* options */
+  .tb-options { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+  .tb-option { display: flex; gap: 12px; align-items: flex-start; padding: 12px; border: 1px solid #e6e9f1; border-radius: 10px; cursor: pointer; margin: 0; transition: border-color .15s, background .15s; }
+  .tb-option:hover { border-color: #cfd5e3; }
+  .tb-option:has(input:checked) { border-color: rgba(var(--adm-accent-rgb), .35); background: #fafaff; }
+  .tb-option.form-switch { padding-left: 12px; min-height: 0; }
+  .tb-option.form-switch .form-check-input { flex: 0 0 auto; float: none; margin: 2px 0 0; width: 2.25em; height: 1.25em; cursor: pointer; }
+  .tb-option:last-child:nth-child(odd) { grid-column: 1 / -1; }
+  .tb-option b { display: block; font-size: 13.5px; font-weight: 600; color: var(--adm-text); }
+  .tb-option small { display: block; margin-top: 2px; font-size: 12.5px; color: var(--adm-muted); line-height: 1.4; }
+  .tb-option small code { font-size: 11.5px; }
+
+  /* errors */
+  .tb-errors { padding: 12px 14px; border-radius: 10px; background: #fef2f2; border: 1px solid #fecaca; color: #b91c1c; font-size: 13.5px; }
+  .tb-errors b { display: block; margin-bottom: 4px; }
+  .tb-errors ul { margin: 0; padding-left: 18px; }
+  .tb .is-invalid { border-color: #dc2626 !important; box-shadow: 0 0 0 3px rgba(220,38,38,.12) !important; }
+
+  /* live preview side panel */
+  .tb-side-label { margin: 0 0 8px; font-size: 11.5px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: var(--adm-muted); }
+  .tb-side-label:not(:first-child) { margin-top: 22px; }
+  .tb-mini { border: 1px solid #dde1ea; border-radius: 10px; overflow: hidden; box-shadow: 0 4px 14px rgba(15,23,42,.06); font-size: 12.5px; }
+  .tb-mini-head { display: flex; align-items: center; gap: 9px; padding: 9px 11px; background: linear-gradient(#fff, #f8f9fc); border-bottom: 1px solid #eceef4; }
+  .tb-mini-head .icon { width: 24px; height: 24px; border-radius: 7px; display: grid; place-items: center; background: var(--adm-accent-soft); color: var(--adm-accent); font-size: 11px; }
+  .tb-mini-head b { display: block; font-size: 13px; }
+  .tb-mini-head small { display: block; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11px; color: var(--adm-muted); }
+  .tb-mini-row { display: flex; align-items: center; gap: 7px; padding: 4px 11px; }
+  .tb-mini-row:nth-child(even) { background: #fbfbfd; }
+  .tb-mini-row i { width: 12px; text-align: center; font-size: 10px; color: #c0c6d4; }
+  .tb-mini-row i.pk { color: #d97706; } .tb-mini-row i.fk { color: var(--adm-accent); } .tb-mini-row i.uq { color: #0891b2; }
+  .tb-mini-row .n { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #1e293b; }
+  .tb-mini-row .n em { font-style: normal; color: #94a3b8; }
+  .tb-mini-row .t { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11px; color: #8a93a8; white-space: nowrap; }
+  .tb-mini-row.auto .n { color: #64748b; }
+  .tb-mini-empty { padding: 10px 11px; color: #94a3b8; font-style: italic; }
+  .tb-endpoints, .tb-files { list-style: none; margin: 0; padding: 0; display: grid; gap: 5px; }
+  .tb-endpoints li { display: flex; align-items: center; gap: 8px; font-size: 12.5px; }
+  .tb-endpoints code { font-size: 12px; color: #334155; background: none; padding: 0; }
+  .tb-endpoints .lock { margin-left: auto; color: #94a3b8; font-size: 11px; }
+  .tb-method { flex: 0 0 52px; text-align: center; font-size: 10.5px; font-weight: 700; letter-spacing: .03em; border-radius: 5px; padding: 2px 0; }
+  .tb-method.get { background: #e0f2fe; color: #0369a1; } .tb-method.post { background: #dcfce7; color: #15803d; }
+  .tb-method.put { background: #fef3c7; color: #b45309; } .tb-method.patch { background: #f3e8ff; color: #7e22ce; }
+  .tb-method.delete { background: #fee2e2; color: #b91c1c; }
+  .tb-files li { display: flex; gap: 8px; align-items: center; font-size: 12px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; color: #475569; word-break: break-all; }
+  .tb-files i { color: #94a3b8; }
+
+  /* code review */
+  .tb-main-code { grid-template-columns: 270px minmax(0, 1fr); }
+  .tb-filelist { overflow-y: auto; padding: 16px 10px; border-right: 1px solid var(--adm-border); background: #fff; display: grid; gap: 2px; align-content: start; }
+  .tb-file { display: flex; flex-direction: column; align-items: flex-start; gap: 1px; width: 100%; text-align: left; border: 0; background: none; border-radius: 8px; padding: 8px 10px; }
+  .tb-file b { font-size: 13px; font-weight: 600; color: #1e293b; }
+  .tb-file small { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11px; color: #94a3b8; word-break: break-all; }
+  .tb-file:hover { background: #f5f6fa; }
+  .tb-file.active { background: var(--adm-accent-soft); }
+  .tb-file.active b { color: var(--adm-accent-dark); }
+  .tb-code { margin: 0; padding: 18px 20px; overflow: auto; background: #0f172a; color: #e2e8f0; font-size: 12.5px; line-height: 1.6; tab-size: 4; white-space: pre; border-radius: 0; }
+
+  /* result */
+  .tb-main-result { grid-template-columns: 1fr; overflow-y: auto; }
+  .tb-result { width: min(620px, 100%); margin: 0 auto; padding: 40px 20px; }
+  .tb-result .ok-icon { width: 52px; height: 52px; border-radius: 14px; display: grid; place-items: center; background: #dcfce7; color: #16a34a; font-size: 22px; margin-bottom: 14px; }
+  .tb-result h3 { margin: 0 0 4px; font-size: 20px; font-weight: 650; }
+  .tb-result ul { margin: 18px 0; padding: 4px 14px; list-style: none; background: #fff; border: 1px solid var(--adm-border); border-radius: 12px; }
+  .tb-result li { display: flex; gap: 10px; align-items: center; padding: 8px 0; border-bottom: 1px solid #f0f2f6; font-size: 13px; }
+  .tb-result li:last-child { border-bottom: 0; }
+  .tb-result li i { color: #16a34a; width: 14px; }
+  .tb-status { display: flex; gap: 10px; align-items: center; padding: 12px 14px; border-radius: 10px; background: #fff; border: 1px solid var(--adm-border); font-size: 13.5px; color: #334155; }
+  .tb-status.warn { background: #fffbeb; border-color: #fde68a; color: #92400e; }
+
+  /* footer */
+  .tb-foot { display: flex; align-items: center; gap: 8px; padding: 12px 20px; background: #fff; border-top: 1px solid var(--adm-border); }
+  .tb-foot-note { margin-right: auto; display: inline-flex; align-items: center; gap: 7px; font-size: 12.5px; color: #94a3b8; }
+  .tb-foot .btn { height: 38px; }
+  .tb-foot .btn[hidden] { display: none; }
+
+  @media (max-width: 1099.98px) {
+    .tb-main { grid-template-columns: minmax(0, 1fr); }
+    .tb-side { display: none; }
+    .tb-steps { display: none; }
+  }
+  @media (max-width: 719.98px) {
+    .tb-overlay { padding: 0; }
+    .tb-modal { height: 100vh; border-radius: 0; }
+    .tb-grid-2, .tb-options { grid-template-columns: 1fr; }
+    .tb-main-code { grid-template-columns: 1fr; grid-template-rows: auto minmax(0, 1fr); }
+    .tb-filelist { display: flex; overflow-x: auto; border-right: 0; border-bottom: 1px solid var(--adm-border); padding: 8px; }
+    .tb-file { width: auto; flex: 0 0 auto; }
+    .tb-file small { display: none; }
+    .tb-foot-note { display: none; }
+    .tb-head-text p { display: none; }
+  }
+
+  @media (max-width: 575.98px) {
+    .erd-search input { width: 130px; }
+    .erd-legend, .erd-hint { display: none; }
+  }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="col-12">
+  <div class="erd-wrap" id="erd">
+    <div class="erd-toolbar" role="toolbar" aria-label="Diagram controls">
+      <label class="erd-search">
+        <i class="fa-solid fa-magnifying-glass"></i>
+        <input type="search" id="erd-search" placeholder="Find table or column" aria-label="Find table or column">
+      </label>
+      <span class="sep"></span>
+      <button class="erd-btn" data-act="zoom-out" title="Zoom out" aria-label="Zoom out"><i class="fa-solid fa-minus"></i></button>
+      <span class="erd-zoom" id="erd-zoom">100%</span>
+      <button class="erd-btn" data-act="zoom-in" title="Zoom in" aria-label="Zoom in"><i class="fa-solid fa-plus"></i></button>
+      <button class="erd-btn" data-act="fit" title="Fit to screen"><i class="fa-solid fa-expand"></i><span>Fit</span></button>
+      <span class="sep"></span>
+      <button class="erd-btn" data-act="arrange" title="Reset to automatic layout"><i class="fa-solid fa-wand-magic-sparkles"></i><span>Auto-arrange</span></button>
+      {% if codegen_enabled %}
+      <span class="sep"></span>
+      <button class="erd-btn erd-btn-primary" id="tb-open" title="Design a new table and generate its code"><i class="fa-solid fa-plus"></i><span>New table</span></button>
+      {% endif %}
+    </div>
+
+    <div class="erd-viewport" id="erd-viewport">
+      <div class="erd-world" id="erd-world">
+        <svg class="erd-edges" id="erd-edges" aria-hidden="true"></svg>
+      </div>
+    </div>
+
+    <div class="erd-legend" aria-label="Legend">
+      <span><i class="fa-solid fa-key pk"></i> Primary key</span>
+      <span><i class="fa-solid fa-link fk"></i> Foreign key</span>
+      <span><i class="fa-solid fa-fingerprint uq"></i> Unique</span>
+      <span><i class="fa-solid fa-circle" style="font-size:7px;color:#94a3b8"></i> Required</span>
+      <span><i class="fa-regular fa-circle" style="font-size:7px;color:#94a3b8"></i> Nullable</span>
+      <span>
+        <svg width="34" height="14" viewBox="0 0 34 14"><path d="M0 7H34M2 3V11M7 3V11"/></svg> exactly one
+      </span>
+      <span>
+        <svg width="34" height="14" viewBox="0 0 34 14"><path d="M0 7H34M34 1L22 7L34 13"/><circle cx="16" cy="7" r="3.5" fill="#fff"/></svg> zero or many
+      </span>
+    </div>
+    <div class="erd-hint">Drag tables · drag background to pan · scroll to zoom · click a table for details</div>
+
+    <aside class="erd-drawer" id="erd-drawer" aria-label="Table details">
+      <div class="erd-drawer-head">
+        <div style="flex:1;min-width:0">
+          <h3 id="erd-d-title"></h3>
+          <div class="sub" id="erd-d-sub"></div>
+        </div>
+        <button class="erd-btn" data-act="close" aria-label="Close details"><i class="fa-solid fa-xmark"></i></button>
+      </div>
+      <div class="erd-drawer-body" id="erd-d-body"></div>
+    </aside>
+
+
+    <div class="erd-tooltip" id="erd-tooltip"></div>
+  </div>
+</div>
+{% if codegen_enabled %}
+<div class="tb-overlay tb" id="tb" aria-hidden="true">
+  <div class="tb-modal" role="dialog" aria-modal="true" aria-labelledby="tb-title">
+    <header class="tb-head">
+      <span class="tb-head-icon"><i class="fa-solid fa-table-cells-large"></i></span>
+      <div class="tb-head-text">
+        <h3 id="tb-title">Create a new table</h3>
+        <p>Design it here. The model, schemas, CRUD API, migration and tests are generated for you.</p>
+      </div>
+      <div class="tb-steps" id="tb-steps" aria-label="Progress">
+        <span data-step="form"><b>1</b>Design</span><i></i>
+        <span data-step="preview"><b>2</b>Review code</span><i></i>
+        <span data-step="result"><b>3</b>Done</span>
+      </div>
+      <button type="button" class="tb-close" data-tb="close" aria-label="Close"><i class="fa-solid fa-xmark"></i></button>
+    </header>
+
+    {# ---------------- 1. design ---------------- #}
+    <div class="tb-main" data-view="form">
+      <div class="tb-form">
+        <div class="tb-errors" id="tb-errors" role="alert" hidden></div>
+
+        <section class="tb-card">
+          <div class="tb-card-head">
+            <span class="tb-num">1</span>
+            <div><h4>Name your table</h4><p>A plural, lowercase name. The model class is suggested for you.</p></div>
+          </div>
+          <div class="tb-grid-2">
+            <label class="tb-field">
+              <span>Table name</span>
+              <input class="form-control tb-mono" id="tb-table" data-field="table_name" placeholder="reviews" autocomplete="off" spellcheck="false">
+              <small id="tb-api-hint">API will live at <code>/…</code></small>
+            </label>
+            <label class="tb-field">
+              <span>Model class</span>
+              <input class="form-control tb-mono" id="tb-class" data-field="class_name" placeholder="Review" autocomplete="off" spellcheck="false">
+              <small id="tb-module-hint">Python files will be named <code>….py</code></small>
+            </label>
+          </div>
+        </section>
+
+        <section class="tb-card">
+          <div class="tb-card-head">
+            <span class="tb-num">2</span>
+            <div><h4>Columns</h4><p>The fields every row has. Tick <b>Required</b> if a value must always be given.</p></div>
+          </div>
+          <div class="tb-fixed"><i class="fa-solid fa-key"></i><code>id</code><span>integer · primary key · added automatically</span></div>
+          <div class="tb-list" id="tb-cols"></div>
+          <button type="button" class="tb-add" id="tb-add-col"><i class="fa-solid fa-plus"></i>Add column</button>
+        </section>
+
+        <section class="tb-card">
+          <div class="tb-card-head">
+            <span class="tb-num">3</span>
+            <div><h4>Relations <span class="tb-optional">optional</span></h4><p>Link each row to a row in another table, e.g. a review belongs to a product.</p></div>
+          </div>
+          <div class="tb-list" id="tb-rels"></div>
+          <button type="button" class="tb-add" id="tb-add-rel"><i class="fa-solid fa-link"></i>Add relation</button>
+        </section>
+
+        <section class="tb-card">
+          <div class="tb-card-head">
+            <span class="tb-num">4</span>
+            <div><h4>Options</h4><p>Sensible defaults are already switched on.</p></div>
+          </div>
+          <div class="tb-options">
+            <label class="tb-option form-switch"><input class="form-check-input" type="checkbox" role="switch" id="tb-ts" checked>
+              <span><b>Timestamps</b><small>Adds <code>created_at</code> and <code>updated_at</code>, filled in automatically.</small></span></label>
+            <label class="tb-option form-switch"><input class="form-check-input" type="checkbox" role="switch" id="tb-auth" checked>
+              <span><b>Login required</b><small>The API only answers requests with a valid token.</small></span></label>
+            <label class="tb-option form-switch"><input class="form-check-input" type="checkbox" role="switch" id="tb-owner">
+              <span><b>Private to each user</b><small>Adds <code>user_id</code>; people only see and edit their own rows.</small></span></label>
+            <label class="tb-option form-switch"><input class="form-check-input" type="checkbox" role="switch" id="tb-tests" checked>
+              <span><b>Generate tests</b><small>A pytest file that exercises the new API.</small></span></label>
+            <label class="tb-option form-switch"><input class="form-check-input" type="checkbox" role="switch" id="tb-apply" checked>
+              <span><b>Create it in the database now</b><small>Applies the migration right away. Otherwise run it from the Database page.</small></span></label>
+          </div>
+        </section>
+      </div>
+
+      <aside class="tb-side" aria-label="Live preview">
+        <div class="tb-side-label">Live preview</div>
+        <div class="tb-mini" id="tb-mini"></div>
+        <div class="tb-side-label">API endpoints</div>
+        <ul class="tb-endpoints" id="tb-endpoints"></ul>
+        <div class="tb-side-label">Files to create</div>
+        <ul class="tb-files" id="tb-files"></ul>
+      </aside>
+    </div>
+
+    {# ---------------- 2. review code ---------------- #}
+    <div class="tb-main tb-main-code" data-view="preview" hidden>
+      <nav class="tb-filelist" id="tb-tabs" aria-label="Generated files"></nav>
+      <pre class="tb-code" id="tb-code"></pre>
+    </div>
+
+    {# ---------------- 3. done ---------------- #}
+    <div class="tb-main tb-main-result" data-view="result" hidden>
+      <div class="tb-result" id="tb-result"></div>
+    </div>
+
+    <footer class="tb-foot">
+      <span class="tb-foot-note" id="tb-note"><i class="fa-solid fa-shield-halved"></i>Development only · creates new files, never overwrites</span>
+      <button type="button" class="btn btn-secondary" id="tb-cancel" data-tb="close">Cancel</button>
+      <button type="button" class="btn btn-secondary" id="tb-back" hidden><i class="fa-solid fa-arrow-left me-2"></i>Back to design</button>
+      <button type="button" class="btn btn-secondary" id="tb-preview"><i class="fa-solid fa-code me-2"></i>Review code</button>
+      <button type="button" class="btn btn-primary" id="tb-create"><i class="fa-solid fa-wand-magic-sparkles me-2"></i>Create table</button>
+    </footer>
+  </div>
+</div>
+{% endif %}
+<script id="erd-data" type="application/json">{{ schema | tojson }}</script>
+{% endblock %}
+
+{% block tail %}
+<script>
+(function () {
+  "use strict";
+
+  var schema = JSON.parse(document.getElementById("erd-data").textContent);
+  var wrap = document.getElementById("erd");
+  var viewport = document.getElementById("erd-viewport");
+  var world = document.getElementById("erd-world");
+  var svg = document.getElementById("erd-edges");
+  var zoomLabel = document.getElementById("erd-zoom");
+  var drawer = document.getElementById("erd-drawer");
+  var tooltip = document.getElementById("erd-tooltip");
+  var SVG_NS = "http://www.w3.org/2000/svg";
+  var STORAGE_KEY = "admin-erd-layout:" + schema.tables.map(function (t) { return t.name; }).sort().join(",");
+
+  var tablesByName = {};
+  schema.tables.forEach(function (t) { tablesByName[t.name] = t; });
+
+  var view = { x: 40, y: 70, k: 1 };
+  var pos = {};        // table name -> {x, y}
+  var cards = {};      // table name -> element
+  var edgeEls = [];    // {edge, g, line, hit, notation}
+  var selected = null;
+
+  // ---------- helpers ----------
+  function el(tag, cls, text) {
+    var e = document.createElement(tag);
+    if (cls) e.className = cls;
+    if (text != null) e.textContent = text;
+    return e;
+  }
+  function svgEl(tag, attrs) {
+    var e = document.createElementNS(SVG_NS, tag);
+    for (var k in attrs) e.setAttribute(k, attrs[k]);
+    return e;
+  }
+  function esc(s) {
+    return String(s).replace(/[&<>"']/g, function (c) {
+      return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c];
+    });
+  }
+  function fmt(n) { return n == null ? "—" : Number(n).toLocaleString(); }
+  function title(t) { return t.model || t.name; }
+
+  // ---------- build table cards ----------
+  schema.tables.forEach(function (t) {
+    var card = el("div", "erd-table");
+    card.tabIndex = 0;
+    card.dataset.table = t.name;
+    card.setAttribute("role", "button");
+    card.setAttribute("aria-label", title(t) + " table, " + t.columns.length + " columns");
+
+    var head = el("div", "erd-head");
+    var icon = el("span", "erd-head-icon");
+    icon.innerHTML = '<i class="fa-solid fa-table"></i>';
+    var text = el("div", "erd-head-text");
+    text.appendChild(el("strong", null, title(t)));
+    text.appendChild(el("small", null, t.name));
+    head.appendChild(icon);
+    head.appendChild(text);
+    head.appendChild(el("span", "erd-count", fmt(t.row_count) + (t.row_count === 1 ? " row" : " rows")));
+    card.appendChild(head);
+
+    var cols = el("div", "erd-cols");
+    t.columns.forEach(function (c) {
+      var row = el("div", "erd-col");
+      row.dataset.column = c.name;
+      var kind = c.primary_key ? "pk" : (c.foreign_keys.length ? "fk" : (c.unique ? "uq" : ""));
+      var ic = el("span", "erd-col-icon " + kind);
+      ic.innerHTML = kind === "pk" ? '<i class="fa-solid fa-key"></i>'
+        : kind === "fk" ? '<i class="fa-solid fa-link"></i>'
+        : kind === "uq" ? '<i class="fa-solid fa-fingerprint"></i>'
+        : (c.nullable ? '<i class="fa-regular fa-circle" style="font-size:7px"></i>' : '<i class="fa-solid fa-circle" style="font-size:7px"></i>');
+      var name = el("span", "erd-col-name" + (c.primary_key ? " pk" : ""));
+      name.textContent = c.name;
+      if (c.nullable && !c.primary_key) {
+        var q = el("span", "opt", "?");
+        q.title = "nullable";
+        name.appendChild(q);
+      }
+      row.title = describeColumn(c);
+      row.appendChild(ic);
+      row.appendChild(name);
+      row.appendChild(el("span", "erd-col-type", c.type.toLowerCase()));
+      cols.appendChild(row);
+    });
+    card.appendChild(cols);
+
+    world.appendChild(card);
+    cards[t.name] = card;
+    bindCard(card, t);
+  });
+
+  function describeColumn(c) {
+    var parts = [c.name + " : " + c.type];
+    if (c.primary_key) parts.push("primary key");
+    c.foreign_keys.forEach(function (fk) { parts.push("→ " + fk.table + "." + fk.column); });
+    parts.push(c.nullable ? "nullable" : "not null");
+    if (c.unique) parts.push("unique");
+    if (c.default) parts.push("default " + c.default);
+    if (c.server_default) parts.push("server default " + c.server_default);
+    return parts.join(" · ");
+  }
+
+  // ---------- edges ----------
+  schema.edges.forEach(function (edge) {
+    var g = svgEl("g", { "class": "erd-edge" });
+    var line = svgEl("path", { "class": "line" });
+    var notation = svgEl("g", { "class": "notation" });
+    var hit = svgEl("path", { "class": "hit" });
+    g.appendChild(line);
+    g.appendChild(notation);
+    g.appendChild(hit);
+    svg.appendChild(g);
+    var item = { edge: edge, g: g, line: line, hit: hit, notation: notation };
+    edgeEls.push(item);
+
+    hit.addEventListener("mouseenter", function (e) {
+      g.classList.add("hl");
+      var ondel = edge.ondelete ? " ON DELETE " + edge.ondelete : "";
+      tooltip.innerHTML =
+        "<code>" + esc(edge.from_table + "." + edge.from_columns.join(", ")) + "</code> → <code>" +
+        esc(edge.to_table + "." + edge.to_columns.join(", ")) + "</code><br>" +
+        esc(cardinalityText(edge)) + (ondel ? "<br>" + esc(ondel.trim()) : "");
+      tooltip.style.display = "block";
+      moveTooltip(e);
+    });
+    hit.addEventListener("mousemove", moveTooltip);
+    hit.addEventListener("mouseleave", function () {
+      tooltip.style.display = "none";
+      if (!hoverTable) g.classList.remove("hl");
+    });
+  });
+
+  function cardinalityText(edge) {
+    var parent = title(tablesByName[edge.to_table]);
+    var child = title(tablesByName[edge.from_table]);
+    if (edge.cardinality === "one-to-one") return "One " + parent + " has at most one " + child;
+    return "One " + parent + " has many " + child + " · each " + child + " belongs to " +
+      (edge.optional ? "zero or one " : "exactly one ") + parent;
+  }
+
+  function moveTooltip(e) {
+    var r = wrap.getBoundingClientRect();
+    tooltip.style.left = Math.min(e.clientX - r.left + 14, r.width - 330) + "px";
+    tooltip.style.top = (e.clientY - r.top + 14) + "px";
+  }
+
+  function rowAnchor(tableName, columnName) {
+    var card = cards[tableName];
+    var row = card.querySelector('[data-column="' + CSS.escape(columnName) + '"]');
+    var p = pos[tableName];
+    var y = row ? row.offsetTop + row.offsetHeight / 2 : 20;
+    return { left: p.x, right: p.x + card.offsetWidth, y: p.y + y, w: card.offsetWidth };
+  }
+
+  // Crow's-foot symbols drawn outward from an endpoint (x, y); d = +1 right, -1 left.
+  function bar(n, x, y, d, off) { n.appendChild(svgEl("path", { d: "M" + (x + d * off) + " " + (y - 7) + "V" + (y + 7) })); }
+  function ring(n, x, y, d, off) { n.appendChild(svgEl("circle", { cx: x + d * off, cy: y, r: 4 })); }
+  function crow(n, x, y, d) {
+    n.appendChild(svgEl("path", { d: "M" + (x + d * 13) + " " + y + "L" + x + " " + (y - 7) + "M" + (x + d * 13) + " " + y + "L" + x + " " + (y + 7) }));
+  }
+
+  function drawEdges() {
+    edgeEls.forEach(function (item) {
+      var e = item.edge;
+      var a = rowAnchor(e.from_table, e.from_columns[0]);
+      var b = rowAnchor(e.to_table, e.to_columns[0]);
+      var da, db, x1, x2;
+      if (a.right + 30 < b.left) { da = 1; db = -1; x1 = a.right; x2 = b.left; }
+      else if (b.right + 30 < a.left) { da = -1; db = 1; x1 = a.left; x2 = b.right; }
+      else { da = 1; db = 1; x1 = a.right; x2 = b.right; }   // overlapping columns: loop around the right
+      var off = Math.max(50, Math.abs(x2 - x1) / 2);
+      if (da === db) off = Math.max(60, Math.abs(x2 - x1) + 60);
+      var d = "M" + x1 + " " + a.y + "C" + (x1 + da * off) + " " + a.y + " " + (x2 + db * off) + " " + b.y + " " + x2 + " " + b.y;
+      item.line.setAttribute("d", d);
+      item.hit.setAttribute("d", d);
+
+      var n = item.notation;
+      while (n.firstChild) n.removeChild(n.firstChild);
+      // Child (FK) end: zero-or-many, or zero-or-one for a unique FK.
+      if (e.cardinality === "one-to-one") { bar(n, x1, a.y, da, 9); } else { crow(n, x1, a.y, da); }
+      ring(n, x1, a.y, da, 19);
+      // Parent end: exactly one, or zero-or-one when the FK is nullable.
+      bar(n, x2, b.y, db, 8);
+      if (e.optional) ring(n, x2, b.y, db, 18); else bar(n, x2, b.y, db, 13);
+    });
+  }
+
+  // ---------- layout ----------
+  function autoLayout() {
+    // Layer tables by FK depth: referenced (parent) tables in the middle, children around them.
+    var depth = {};
+    function getDepth(name, seen) {
+      if (depth[name] != null) return depth[name];
+      if (seen[name]) return 0;
+      seen[name] = true;
+      var parents = schema.edges.filter(function (e) { return e.from_table === name && e.to_table !== name; });
+      var d = parents.length ? 1 + Math.max.apply(null, parents.map(function (e) { return getDepth(e.to_table, seen); })) : 0;
+      depth[name] = d;
+      return d;
+    }
+    schema.tables.forEach(function (t) { getDepth(t.name, {}); });
+
+    var GAP_X = 140, GAP_Y = 36;
+    var layers = {};      // "side:depth" -> [names]
+    var side = {};
+    var load = { "-1": 0, "1": 0 };
+    var ordered = schema.tables.slice().sort(function (a, b) { return depth[a.name] - depth[b.name]; });
+    ordered.forEach(function (t) {
+      var d = depth[t.name];
+      if (d === 0) { side[t.name] = 0; }
+      else {
+        var parentEdge = schema.edges.find(function (e) { return e.from_table === t.name && e.to_table !== t.name; });
+        var ps = parentEdge ? side[parentEdge.to_table] : 0;
+        if (ps) side[t.name] = ps;
+        else { side[t.name] = load["1"] <= load["-1"] ? 1 : -1; }
+        load[String(side[t.name])] += cards[t.name].offsetHeight + GAP_Y;
+      }
+      var key = side[t.name] + ":" + d;
+      (layers[key] = layers[key] || []).push(t.name);
+    });
+
+    var colWidth = Math.max.apply(null, schema.tables.map(function (t) { return cards[t.name].offsetWidth; }));
+    var heights = {};
+    Object.keys(layers).forEach(function (key) {
+      heights[key] = layers[key].reduce(function (h, n) { return h + cards[n].offsetHeight + GAP_Y; }, -GAP_Y);
+    });
+    var maxH = Math.max.apply(null, Object.values(heights));
+    var maxDepth = Math.max.apply(null, Object.values(depth).concat([0]));
+    var hasLeft = Object.keys(layers).some(function (k) { return k.indexOf("-1:") === 0; });
+
+    Object.keys(layers).forEach(function (key) {
+      var parts = key.split(":"), s = Number(parts[0]), d = Number(parts[1]);
+      var colIndex = (hasLeft ? maxDepth : 0) + s * d;
+      var x = colIndex * (colWidth + GAP_X);
+      var y = (maxH - heights[key]) / 2;
+      layers[key].forEach(function (n) {
+        pos[n] = { x: x + (colWidth - cards[n].offsetWidth) / 2, y: y };
+        y += cards[n].offsetHeight + GAP_Y;
+      });
+    });
+  }
+
+  function placeCards() {
+    Object.keys(cards).forEach(function (n) {
+      cards[n].style.left = pos[n].x + "px";
+      cards[n].style.top = pos[n].y + "px";
+    });
+    drawEdges();
+  }
+
+  function applyView() {
+    world.style.transform = "translate(" + view.x + "px," + view.y + "px) scale(" + view.k + ")";
+    zoomLabel.textContent = Math.round(view.k * 100) + "%";
+  }
+
+  function fit() {
+    var names = Object.keys(pos);
+    if (!names.length) return;
+    var minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+    names.forEach(function (n) {
+      minX = Math.min(minX, pos[n].x); minY = Math.min(minY, pos[n].y);
+      maxX = Math.max(maxX, pos[n].x + cards[n].offsetWidth);
+      maxY = Math.max(maxY, pos[n].y + cards[n].offsetHeight);
+    });
+    var pad = 70, topPad = 70, bottomPad = 60;
+    var w = viewport.clientWidth, h = viewport.clientHeight;
+    var k = Math.min((w - pad * 2) / (maxX - minX), (h - topPad - bottomPad) / (maxY - minY), 1.25);
+    view.k = Math.max(0.2, k);
+    view.x = (w - (maxX - minX) * view.k) / 2 - minX * view.k;
+    view.y = topPad + (h - topPad - bottomPad - (maxY - minY) * view.k) / 2 - minY * view.k;
+    applyView();
+  }
+
+  function zoomAt(factor, cx, cy) {
+    var k = Math.min(2.5, Math.max(0.2, view.k * factor));
+    var wx = (cx - view.x) / view.k, wy = (cy - view.y) / view.k;
+    view.k = k;
+    view.x = cx - wx * k;
+    view.y = cy - wy * k;
+    applyView();
+    save();
+  }
+
+  function save() {
+    try { localStorage.setItem(STORAGE_KEY, JSON.stringify({ pos: pos, view: view })); } catch (e) { /* storage unavailable */ }
+  }
+  function load() {
+    try {
+      var saved = JSON.parse(localStorage.getItem(STORAGE_KEY) || "null");
+      if (saved && saved.pos && schema.tables.every(function (t) { return saved.pos[t.name]; })) return saved;
+    } catch (e) { /* ignore */ }
+    return null;
+  }
+
+  // ---------- interaction: drag tables ----------
+  var hoverTable = null;
+  function bindCard(card, t) {
+    var drag = null;
+    card.addEventListener("pointerdown", function (e) {
+      if (e.button !== 0) return;
+      e.stopPropagation();
+      drag = { sx: e.clientX, sy: e.clientY, x: pos[t.name].x, y: pos[t.name].y, moved: false };
+      card.setPointerCapture(e.pointerId);
+    });
+    card.addEventListener("pointermove", function (e) {
+      if (!drag) return;
+      var dx = (e.clientX - drag.sx) / view.k, dy = (e.clientY - drag.sy) / view.k;
+      if (!drag.moved && Math.abs(dx) + Math.abs(dy) < 3) return;
+      drag.moved = true;
+      card.classList.add("is-dragging");
+      pos[t.name] = { x: Math.round(drag.x + dx), y: Math.round(drag.y + dy) };
+      card.style.left = pos[t.name].x + "px";
+      card.style.top = pos[t.name].y + "px";
+      drawEdges();
+    });
+    function end() {
+      if (!drag) return;
+      card.classList.remove("is-dragging");
+      if (drag.moved) save(); else select(t.name);
+      drag = null;
+    }
+    card.addEventListener("pointerup", end);
+    card.addEventListener("pointercancel", end);
+    card.addEventListener("keydown", function (e) {
+      if (e.key === "Enter" || e.key === " ") { e.preventDefault(); select(t.name); }
+    });
+    card.addEventListener("mouseenter", function () { highlight(t.name); });
+    card.addEventListener("mouseleave", function () { highlight(null); });
+  }
+
+  function highlight(name) {
+    hoverTable = name;
+    var related = {};
+    if (name) related[name] = true;
+    edgeEls.forEach(function (item) {
+      var on = !!name && (item.edge.from_table === name || item.edge.to_table === name);
+      item.g.classList.toggle("hl", on);
+      if (on) { related[item.edge.from_table] = true; related[item.edge.to_table] = true; }
+    });
+    Object.keys(cards).forEach(function (n) { cards[n].classList.toggle("hl", !!related[n]); });
+    wrap.classList.toggle("erd-dim", !!name);
+  }
+
+  // ---------- interaction: pan & zoom ----------
+  var pan = null;
+  viewport.addEventListener("pointerdown", function (e) {
+    if (e.button !== 0) return;
+    pan = { sx: e.clientX, sy: e.clientY, x: view.x, y: view.y, moved: false };
+    viewport.setPointerCapture(e.pointerId);
+    viewport.classList.add("is-panning");
+  });
+  viewport.addEventListener("pointermove", function (e) {
+    if (!pan) return;
+    var dx = e.clientX - pan.sx, dy = e.clientY - pan.sy;
+    if (Math.abs(dx) + Math.abs(dy) > 3) pan.moved = true;
+    view.x = pan.x + dx; view.y = pan.y + dy;
+    applyView();
+  });
+  function endPan() {
+    if (!pan) return;
+    viewport.classList.remove("is-panning");
+    if (pan.moved) save(); else closeDrawer();
+    pan = null;
+  }
+  viewport.addEventListener("pointerup", endPan);
+  viewport.addEventListener("pointercancel", endPan);
+  viewport.addEventListener("wheel", function (e) {
+    e.preventDefault();
+    var r = viewport.getBoundingClientRect();
+    zoomAt(Math.exp(-e.deltaY * 0.0015), e.clientX - r.left, e.clientY - r.top);
+  }, { passive: false });
+
+  wrap.querySelector(".erd-toolbar").addEventListener("click", function (e) {
+    var btn = e.target.closest("[data-act]");
+    if (!btn) return;
+    var w = viewport.clientWidth / 2, h = viewport.clientHeight / 2;
+    switch (btn.dataset.act) {
+      case "zoom-in": zoomAt(1.2, w, h); break;
+      case "zoom-out": zoomAt(1 / 1.2, w, h); break;
+      case "fit": fit(); save(); break;
+      case "arrange": autoLayout(); placeCards(); fit(); save(); break;
+    }
+  });
+  drawer.querySelector('[data-act="close"]').addEventListener("click", closeDrawer);
+  document.addEventListener("keydown", function (e) { if (e.key === "Escape") closeDrawer(); });
+
+  // ---------- search ----------
+  var search = document.getElementById("erd-search");
+  search.addEventListener("input", function () {
+    var q = search.value.trim().toLowerCase();
+    var first = null;
+    schema.tables.forEach(function (t) {
+      var card = cards[t.name];
+      var tableHit = q && (t.name.toLowerCase().indexOf(q) > -1 || (t.model || "").toLowerCase().indexOf(q) > -1);
+      var colHit = false;
+      card.querySelectorAll(".erd-col").forEach(function (row) {
+        var m = !!q && row.dataset.column.toLowerCase().indexOf(q) > -1;
+        row.classList.toggle("match", m);
+        colHit = colHit || m;
+      });
+      var match = !q || tableHit || colHit;
+      card.classList.toggle("no-match", !match);
+      if (q && match && !first) first = t.name;
+    });
+    if (first) centerOn(first);
+  });
+
+  function centerOn(name) {
+    var card = cards[name];
+    var cx = pos[name].x + card.offsetWidth / 2, cy = pos[name].y + card.offsetHeight / 2;
+    // Keep the card clear of the details drawer when it's open.
+    var visibleWidth = viewport.clientWidth - (drawer.classList.contains("open") ? drawer.offsetWidth : 0);
+    view.x = Math.max(visibleWidth, 200) / 2 - cx * view.k;
+    view.y = viewport.clientHeight / 2 - cy * view.k;
+    applyView();
+  }
+
+  // ---------- details drawer ----------
+  function closeDrawer() {
+    drawer.classList.remove("open");
+    if (selected) cards[selected].classList.remove("is-selected");
+    selected = null;
+  }
+
+  function select(name) {
+    if (selected) cards[selected].classList.remove("is-selected");
+    selected = name;
+    cards[name].classList.add("is-selected");
+    var t = tablesByName[name];
+
+    document.getElementById("erd-d-title").textContent = title(t);
+    document.getElementById("erd-d-sub").textContent = "table: " + t.name;
+
+    var incoming = schema.edges.filter(function (e) { return e.to_table === name; });
+    var outgoing = schema.edges.filter(function (e) { return e.from_table === name; });
+    var h = "";
+
+    h += '<div class="erd-stats">' +
+      '<div class="erd-stat"><b>' + fmt(t.row_count) + '</b><span>rows</span></div>' +
+      '<div class="erd-stat"><b>' + t.columns.length + '</b><span>columns</span></div>' +
+      '<div class="erd-stat"><b>' + (incoming.length + outgoing.length) + '</b><span>foreign keys</span></div>' +
+      '</div>';
+    if (t.admin_url) {
+      h += '<a class="btn btn-secondary w-100 mt-3" href="' + esc(t.admin_url) + '"><i class="fa-solid fa-table-list me-2"></i>Browse ' + esc(title(t)) + ' records</a>';
+    }
+    if (t.comment) h += '<p class="mt-3 mb-0">' + esc(t.comment) + "</p>";
+
+    h += "<h4>Columns</h4>";
+    t.columns.forEach(function (c) {
+      var chips = "";
+      if (c.primary_key) chips += '<span class="erd-chip pk">PRIMARY KEY</span>';
+      if (c.autoincrement) chips += '<span class="erd-chip">AUTOINCREMENT</span>';
+      c.foreign_keys.forEach(function (fk) {
+        chips += '<span class="erd-chip fk" data-goto="' + esc(fk.table) + '">→ ' + esc(fk.table + "." + fk.column) +
+          (fk.ondelete ? " · ON DELETE " + esc(fk.ondelete) : "") + "</span>";
+      });
+      chips += c.nullable ? '<span class="erd-chip null">NULL</span>' : '<span class="erd-chip nn">NOT NULL</span>';
+      if (c.unique) chips += '<span class="erd-chip uq">UNIQUE</span>';
+      if (c.indexed) chips += '<span class="erd-chip">INDEXED</span>';
+      if (c.default != null) chips += '<span class="erd-chip def">default: ' + esc(c.default) + "</span>";
+      if (c.server_default != null) chips += '<span class="erd-chip def">server default: ' + esc(c.server_default) + "</span>";
+      h += '<div class="erd-dcol"><div class="erd-dcol-top"><b>' + esc(c.name) + "</b><code>" + esc(c.type) + "</code></div>" +
+        '<div class="erd-chips">' + chips + "</div>" +
+        (c.comment ? '<div class="erd-empty-note mt-1">' + esc(c.comment) + "</div>" : "") + "</div>";
+    });
+
+    h += "<h4>Relationships (ORM)</h4>";
+    if (!t.relationships.length) h += '<div class="erd-empty-note">None</div>';
+    t.relationships.forEach(function (r) {
+      var kind = { ONETOMANY: "one-to-many", MANYTOONE: "many-to-one", MANYTOMANY: "many-to-many" }[r.direction] || r.direction;
+      h += '<div class="erd-list-item"><code>.' + esc(r.name) + "</code> → " +
+        '<a data-goto="' + esc(r.target_table) + '">' + esc(r.target_model) + "</a>" + (r.uselist ? " (list)" : "") +
+        '<span class="meta">' + esc(kind) +
+        (r.back_populates ? " · back_populates <code>" + esc(r.back_populates) + "</code>" : "") +
+        (r.secondary ? " · via " + esc(r.secondary) : "") +
+        (r.cascade && r.cascade !== "merge, save-update" ? " · cascade: " + esc(r.cascade) : "") + "</span></div>";
+    });
+
+    h += "<h4>Foreign keys</h4>";
+    if (!incoming.length && !outgoing.length) h += '<div class="erd-empty-note">None</div>';
+    outgoing.forEach(function (e) {
+      h += '<div class="erd-list-item"><code>' + esc(e.from_columns.join(", ")) + "</code> references " +
+        '<a data-goto="' + esc(e.to_table) + '">' + esc(e.to_table) + "</a>.<code>" + esc(e.to_columns.join(", ")) + "</code>" +
+        '<span class="meta">' + esc(cardinalityText(e)) + (e.ondelete ? " · ON DELETE " + esc(e.ondelete) : "") + "</span></div>";
+    });
+    incoming.forEach(function (e) {
+      h += '<div class="erd-list-item">Referenced by <a data-goto="' + esc(e.from_table) + '">' + esc(e.from_table) +
+        "</a>.<code>" + esc(e.from_columns.join(", ")) + "</code>" +
+        '<span class="meta">' + esc(cardinalityText(e)) + (e.ondelete ? " · ON DELETE " + esc(e.ondelete) : "") + "</span></div>";
+    });
+
+    h += "<h4>Indexes</h4>";
+    if (!t.indexes.length) h += '<div class="erd-empty-note">None</div>';
+    t.indexes.forEach(function (i) {
+      h += '<div class="erd-list-item"><code>' + esc(i.name || "(unnamed)") + "</code>" +
+        '<span class="meta">' + (i.unique ? "unique · " : "") + "on " + esc(i.columns.join(", ")) + "</span></div>";
+    });
+
+    h += "<h4>Unique constraints</h4>";
+    if (!t.unique_constraints.length) h += '<div class="erd-empty-note">None</div>';
+    t.unique_constraints.forEach(function (u) {
+      h += '<div class="erd-list-item"><code>' + esc(u.name || "(unnamed)") + '</code><span class="meta">on ' + esc(u.columns.join(", ")) + "</span></div>";
+    });
+
+    var body = document.getElementById("erd-d-body");
+    body.innerHTML = h;
+    body.scrollTop = 0;
+    drawer.classList.add("open");
+  }
+
+  document.getElementById("erd-d-body").addEventListener("click", function (e) {
+    var link = e.target.closest("[data-goto]");
+    if (!link) return;
+    var name = link.dataset.goto;
+    if (cards[name]) { centerOn(name); select(name); save(); }
+  });
+
+  // ---------- init ----------
+  var saved = load();
+  if (saved) {
+    pos = saved.pos;
+    view = saved.view || view;
+    placeCards();
+    applyView();
+  } else {
+    autoLayout();
+    placeCards();
+    fit();
+  }
+  window.addEventListener("resize", drawEdges);
+
+  // ?focus=<table>: centre on a table and open its details (used after creating a table).
+  var focus = new URLSearchParams(window.location.search).get("focus");
+  if (focus && cards[focus]) {
+    if (!saved || !saved.pos[focus]) { autoLayout(); placeCards(); fit(); save(); }
+    select(focus);
+    centerOn(focus);
+    history.replaceState(null, "", window.location.pathname);
+  }
+})();
+</script>
+{% if codegen_enabled %}
+<script>
+(function () {
+  "use strict";
+  var schema = JSON.parse(document.getElementById("erd-data").textContent);
+  var tb = document.getElementById("tb");
+  var colsEl = document.getElementById("tb-cols");
+  var relsEl = document.getElementById("tb-rels");
+  var errorsEl = document.getElementById("tb-errors");
+  var tableIn = document.getElementById("tb-table");
+  var classIn = document.getElementById("tb-class");
+  var btnPreview = document.getElementById("tb-preview");
+  var btnCreate = document.getElementById("tb-create");
+  var btnBack = document.getElementById("tb-back");
+  var btnCancel = document.getElementById("tb-cancel");
+  var classTouched = false, busy = false;
+
+  var TYPES = [
+    ["string", "Short text"], ["text", "Long text"], ["integer", "Integer"], ["big_integer", "Big integer"],
+    ["float", "Float"], ["decimal", "Decimal"], ["boolean", "True / false"], ["date", "Date"],
+    ["datetime", "Date & time"], ["json", "JSON"]
+  ];
+  var DEFAULT_HINT = {
+    string: "Default (optional)", text: "Default (optional)", integer: "Default, e.g. 0", big_integer: "Default, e.g. 0",
+    float: "Default, e.g. 1.5", decimal: "Default, e.g. 9.99", boolean: "Default: true / false",
+    date: "Default: now", datetime: "Default: now", json: "Default, e.g. {}"
+  };
+  var ON_DELETE = [["CASCADE", "delete this row too"], ["SET NULL", "clear the link"], ["RESTRICT", "block the delete"]];
+
+  function esc(s) { var d = document.createElement("div"); d.textContent = s == null ? "" : String(s); return d.innerHTML; }
+  function el(html) { var t = document.createElement("template"); t.innerHTML = html.trim(); return t.content.firstChild; }
+  function q(root, k) { return root.querySelector('[data-k="' + k + '"]'); }
+  function singular(word) {
+    if (/ies$/.test(word) && word.length > 3) return word.slice(0, -3) + "y";
+    if (/(sses|xes|ches|shes)$/.test(word)) return word.slice(0, -2);
+    if (/s$/.test(word) && !/ss$/.test(word)) return word.slice(0, -1);
+    return word;
+  }
+  function suggestClass(table) {
+    var parts = table.split("_").filter(Boolean);
+    if (!parts.length) return "";
+    parts[parts.length - 1] = singular(parts[parts.length - 1]);
+    return parts.map(function (p) { return p.charAt(0).toUpperCase() + p.slice(1); }).join("");
+  }
+  function snake(name) { return name.replace(/(?!^)([A-Z])/g, "_$1").toLowerCase(); }
+  function identifier(input) {
+    input.addEventListener("input", function () { this.value = this.value.toLowerCase().replace(/[\s-]+/g, "_"); });
+  }
+  function pill(key, label, icon, checked) {
+    return '<label class="tb-pill"><input type="checkbox" data-k="' + key + '"' + (checked ? " checked" : "") +
+      '><span><i class="fa-solid ' + icon + '"></i>' + label + "</span></label>";
+  }
+
+  // ---------------- open / close / views ----------------
+  function open() {
+    tb.classList.add("open");
+    tb.setAttribute("aria-hidden", "false");
+    document.body.style.overflow = "hidden";
+    if (!colsEl.children.length) addColumn({ name: "name", type: "string", length: 255, nullable: false });
+    render();
+    setTimeout(function () { tableIn.focus(); }, 200);
+  }
+  function close() {
+    if (busy) return;
+    tb.classList.remove("open");
+    tb.setAttribute("aria-hidden", "true");
+    document.body.style.overflow = "";
+  }
+  function view(name) {
+    tb.querySelectorAll("[data-view]").forEach(function (v) { v.hidden = v.dataset.view !== name; });
+    var order = ["form", "preview", "result"];
+    tb.querySelectorAll("[data-step]").forEach(function (s) {
+      var i = order.indexOf(s.dataset.step), cur = order.indexOf(name);
+      s.classList.toggle("active", i === cur);
+      s.classList.toggle("done", i < cur);
+    });
+    btnBack.hidden = name !== "preview";
+    btnPreview.hidden = name !== "form";
+    btnCreate.hidden = name === "result";
+    btnCancel.hidden = name === "result";
+  }
+  document.getElementById("tb-open").addEventListener("click", open);
+  tb.querySelectorAll('[data-tb="close"]').forEach(function (b) { b.addEventListener("click", close); });
+  tb.addEventListener("mousedown", function (e) { if (e.target === tb) close(); });  // click outside the dialog
+  btnBack.addEventListener("click", function () { view("form"); });
+  document.addEventListener("keydown", function (e) { if (e.key === "Escape" && tb.classList.contains("open")) close(); });
+
+  // ---------------- names ----------------
+  identifier(tableIn);
+  tableIn.addEventListener("input", function () { if (!classTouched) classIn.value = suggestClass(tableIn.value.trim()); render(); });
+  classIn.addEventListener("input", function () { classTouched = !!classIn.value; render(); });
+
+  // ---------------- columns ----------------
+  function addColumn(c) {
+    c = c || {};
+    var opts = TYPES.map(function (t) { return '<option value="' + t[0] + '">' + t[1] + "</option>"; }).join("");
+    var row = el(
+      '<div class="tb-item tb-col">' +
+        '<div class="tb-line">' +
+          '<input class="form-control tb-mono tb-in-name" data-k="name" placeholder="column_name" spellcheck="false" aria-label="Column name">' +
+          '<select class="form-select tb-in-type" data-k="type" aria-label="Type">' + opts + "</select>" +
+          '<span class="tb-size"></span>' +
+          '<button type="button" class="tb-x" title="Remove column" aria-label="Remove column"><i class="fa-solid fa-trash-can"></i></button>' +
+        "</div>" +
+        '<div class="tb-line">' +
+          pill("required", "Required", "fa-asterisk", c.nullable === false) +
+          pill("unique", "Unique", "fa-fingerprint", c.unique) +
+          pill("index", "Indexed", "fa-bolt", c.index) +
+          '<input class="form-control tb-in-default" data-k="default" spellcheck="false" aria-label="Default value">' +
+        "</div>" +
+      "</div>");
+    q(row, "name").value = c.name || "";
+    q(row, "type").value = c.type || "string";
+    q(row, "default").value = c.default || "";
+    identifier(q(row, "name"));
+    q(row, "type").addEventListener("change", function () { renderSize(row, {}); render(); });
+    row.querySelector(".tb-x").addEventListener("click", function () { row.remove(); render(); });
+    row.addEventListener("input", render);
+    row.addEventListener("change", render);
+    colsEl.appendChild(row);
+    renderSize(row, c);
+    return row;
+  }
+  function renderSize(row, c) {
+    var type = q(row, "type").value, size = row.querySelector(".tb-size");
+    if (type === "string") {
+      size.innerHTML = '<input class="form-control" data-k="length" type="number" min="1" max="10000" aria-label="Max length"> chars';
+      q(size, "length").value = c.length || 255;
+    } else if (type === "decimal") {
+      size.innerHTML = '<input class="form-control" data-k="precision" type="number" min="1" max="38" aria-label="Total digits"> digits,' +
+                       '<input class="form-control" data-k="scale" type="number" min="0" max="38" aria-label="Decimal places"> decimals';
+      q(size, "precision").value = c.precision || 10;
+      q(size, "scale").value = c.scale != null ? c.scale : 2;
+    } else {
+      size.innerHTML = "";
+    }
+    q(row, "default").placeholder = DEFAULT_HINT[type] || "Default (optional)";
+  }
+  document.getElementById("tb-add-col").addEventListener("click", function () { q(addColumn(), "name").focus(); render(); });
+
+  // ---------------- relations ----------------
+  function addRelation() {
+    var tables = schema.tables.map(function (t) {
+      return '<option value="' + esc(t.name) + '">' + esc(t.model || t.name) + " (" + esc(t.name) + ")</option>";
+    }).join("");
+    var od = ON_DELETE.map(function (o) { return '<option value="' + o[0] + '">' + o[1] + "</option>"; }).join("");
+    var row = el(
+      '<div class="tb-item tb-rel">' +
+        '<div class="tb-line">' +
+          '<input class="form-control tb-mono tb-in-name" data-k="column" placeholder="product_id" spellcheck="false" aria-label="Column name">' +
+          '<span class="tb-word">references</span>' +
+          '<select class="form-select tb-in-target" data-k="target_table" aria-label="Table it points to">' + tables + "</select>" +
+          '<button type="button" class="tb-x" title="Remove relation" aria-label="Remove relation"><i class="fa-solid fa-trash-can"></i></button>' +
+        "</div>" +
+        '<div class="tb-line">' +
+          '<span class="tb-word">If that row is deleted:</span>' +
+          '<select class="form-select tb-in-ondelete" data-k="on_delete" aria-label="When the referenced row is deleted">' + od + "</select>" +
+          pill("required", "Required", "fa-asterisk", true) +
+        "</div>" +
+      "</div>");
+    var colIn = q(row, "column"), target = q(row, "target_table"), colTouched = false;
+    function suggest() { if (!colTouched) colIn.value = singular(target.value) + "_id"; }
+    identifier(colIn);
+    colIn.addEventListener("input", function () { colTouched = true; });
+    target.addEventListener("change", suggest);
+    q(row, "on_delete").addEventListener("change", function () {
+      if (this.value === "SET NULL") q(row, "required").checked = false;  // "clear the link" needs an optional column
+    });
+    q(row, "required").addEventListener("change", function () {
+      if (this.checked && q(row, "on_delete").value === "SET NULL") q(row, "on_delete").value = "CASCADE";
+    });
+    row.querySelector(".tb-x").addEventListener("click", function () { row.remove(); render(); });
+    row.addEventListener("input", render);
+    row.addEventListener("change", render);
+    relsEl.appendChild(row);
+    suggest();
+    render();
+  }
+  document.getElementById("tb-add-rel").addEventListener("click", addRelation);
+  ["tb-ts", "tb-auth", "tb-owner", "tb-tests"].forEach(function (id) { document.getElementById(id).addEventListener("change", render); });
+
+  // ---------------- collect ----------------
+  function num(row, k) { var i = q(row, k); return i && i.value !== "" ? Number(i.value) : null; }
+  function collect() {
+    return {
+      table_name: tableIn.value.trim(),
+      class_name: classIn.value.trim(),
+      columns: Array.prototype.map.call(colsEl.children, function (row) {
+        return {
+          name: q(row, "name").value.trim(), type: q(row, "type").value,
+          length: num(row, "length"), precision: num(row, "precision"), scale: num(row, "scale"),
+          nullable: !q(row, "required").checked, unique: q(row, "unique").checked, index: q(row, "index").checked,
+          "default": q(row, "default").value
+        };
+      }),
+      relations: Array.prototype.map.call(relsEl.children, function (row) {
+        return {
+          column: q(row, "column").value.trim(), target_table: q(row, "target_table").value,
+          on_delete: q(row, "on_delete").value, nullable: !q(row, "required").checked
+        };
+      }),
+      timestamps: document.getElementById("tb-ts").checked,
+      require_auth: document.getElementById("tb-auth").checked,
+      owner_scoped: document.getElementById("tb-owner").checked,
+      generate_tests: document.getElementById("tb-tests").checked
+    };
+  }
+
+  // ---------------- live preview ----------------
+  function typeLabel(c) {
+    if (c.type === "string") return "varchar(" + (c.length || 255) + ")";
+    if (c.type === "decimal") return "numeric(" + (c.precision || 10) + ", " + (c.scale != null ? c.scale : 2) + ")";
+    return c.type.replace("_", " ");
+  }
+  function render() {
+    var s = collect();
+    var table = s.table_name || "your_table", cls = s.class_name || suggestClass(table) || "Model";
+    var url = "/" + table.replace(/_/g, "-"), mod = snake(cls);
+    document.getElementById("tb-api-hint").innerHTML = "API will live at <code>" + esc(url) + "</code>";
+    document.getElementById("tb-module-hint").innerHTML = "Python files will be named <code>" + esc(mod) + ".py</code>";
+
+    var rows = ['<div class="tb-mini-row auto"><i class="fa-solid fa-key pk"></i><span class="n">id</span><span class="t">integer</span></div>'];
+    s.columns.forEach(function (c) {
+      var icon = c.unique ? '<i class="fa-solid fa-fingerprint uq"></i>'
+        : '<i class="' + (c.nullable ? "fa-regular" : "fa-solid") + ' fa-circle" style="font-size:6px"></i>';
+      rows.push('<div class="tb-mini-row">' + icon + '<span class="n">' + (esc(c.name) || "<em>unnamed</em>") +
+        (c.nullable ? "<em>?</em>" : "") + '</span><span class="t">' + esc(typeLabel(c)) + "</span></div>");
+    });
+    var rels = s.relations.slice();
+    if (s.owner_scoped) rels.unshift({ column: "user_id", target_table: "users", nullable: false });
+    rels.forEach(function (r) {
+      rows.push('<div class="tb-mini-row"><i class="fa-solid fa-link fk"></i><span class="n">' + (esc(r.column) || "<em>unnamed</em>") +
+        (r.nullable ? "<em>?</em>" : "") + '</span><span class="t">→ ' + esc(r.target_table) + "</span></div>");
+    });
+    if (s.timestamps) {
+      ["created_at", "updated_at"].forEach(function (n) {
+        rows.push('<div class="tb-mini-row auto"><i class="fa-regular fa-circle" style="font-size:6px"></i><span class="n">' + n + '</span><span class="t">datetime</span></div>');
+      });
+    }
+    document.getElementById("tb-mini").innerHTML =
+      '<div class="tb-mini-head"><span class="icon"><i class="fa-solid fa-table"></i></span><div><b>' + esc(cls) + "</b><small>" + esc(table) + "</small></div></div>" +
+      rows.join("");
+
+    var lock = s.require_auth || s.owner_scoped ? '<i class="fa-solid fa-lock lock" title="Login required"></i>' : "";
+    var eps = [["get", url + "/"], ["post", url + "/"], ["get", url + "/{id}"], ["put", url + "/{id}"], ["patch", url + "/{id}"], ["delete", url + "/{id}"]];
+    document.getElementById("tb-endpoints").innerHTML = eps.map(function (e) {
+      return '<li><span class="tb-method ' + e[0] + '">' + e[0].toUpperCase() + "</span><code>" + esc(e[1]) + "</code>" + lock + "</li>";
+    }).join("");
+
+    var files = ["app/models/" + mod + ".py", "app/schemas/" + mod + ".py", "app/crud/" + mod + "_crud.py",
+                 "app/routes/" + mod + ".py", "alembic/versions/…_create_" + table + ".py"];
+    if (s.generate_tests) files.push("tests/test_" + mod + "_api.py");
+    document.getElementById("tb-files").innerHTML = files.map(function (f) {
+      return '<li><i class="fa-regular fa-file-code"></i>' + esc(f) + "</li>";
+    }).join("");
+  }
+
+  // ---------------- errors ----------------
+  function clearErrors() {
+    errorsEl.hidden = true;
+    tb.querySelectorAll(".is-invalid").forEach(function (i) { i.classList.remove("is-invalid"); });
+  }
+  function fieldInput(field) {
+    if (field === "table_name") return tableIn;
+    if (field === "class_name") return classIn;
+    var m = /^(columns|relations)\[(\d+)\]\.?(\w+)?/.exec(field || "");
+    if (!m) return null;
+    var row = (m[1] === "columns" ? colsEl : relsEl).children[Number(m[2])];
+    if (!row) return null;
+    var key = m[3] === "nullable" ? "required" : (m[3] || (m[1] === "columns" ? "name" : "column"));
+    var input = q(row, key) || row.querySelector("input");
+    return input && input.type === "checkbox" ? input.nextElementSibling : input;
+  }
+  function showErrors(errors) {
+    clearErrors();
+    errorsEl.innerHTML = "<b>Please fix the following:</b><ul>" + errors.map(function (e) { return "<li>" + esc(e.message) + "</li>"; }).join("") + "</ul>";
+    errorsEl.hidden = false;
+    errors.forEach(function (e) { var i = fieldInput(e.field); if (i) i.classList.add("is-invalid"); });
+    view("form");
+    errorsEl.scrollIntoView({ behavior: "smooth", block: "start" });
+  }
+
+  // ---------------- server calls ----------------
+  function post(action) {
+    return fetch(window.location.pathname, {
+      method: "POST", credentials: "same-origin", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action: action, spec: collect(), apply: document.getElementById("tb-apply").checked })
+    }).then(function (r) { return r.json(); });
+  }
+  function setBusy(on, label) {
+    busy = on;
+    btnPreview.disabled = btnCreate.disabled = btnBack.disabled = on;
+    btnCreate.innerHTML = on ? '<i class="fa-solid fa-spinner fa-spin me-2"></i>' + label
+                             : '<i class="fa-solid fa-wand-magic-sparkles me-2"></i>Create table';
+  }
+  var FILE_LABELS = { models: "Model", schemas: "Schemas", crud: "CRUD", routes: "API routes", versions: "Migration", tests: "Tests" };
+
+  btnPreview.addEventListener("click", function () {
+    clearErrors();
+    btnPreview.disabled = true;
+    post("preview").then(function (d) {
+      if (!d.ok) return showErrors(d.errors);
+      var list = document.getElementById("tb-tabs"), code = document.getElementById("tb-code");
+      list.innerHTML = "";
+      d.files.forEach(function (f, i) {
+        var kind = f.path.split("/").slice(-2)[0];
+        var b = el('<button type="button" class="tb-file"><b>' + esc(FILE_LABELS[kind] || kind) + "</b><small>" + esc(f.path) + "</small></button>");
+        b.addEventListener("click", function () {
+          list.querySelectorAll(".tb-file").forEach(function (x) { x.classList.remove("active"); });
+          b.classList.add("active");
+          code.textContent = f.content;
+          code.scrollTop = 0;
+        });
+        list.appendChild(b);
+        if (i === 0) b.click();
+      });
+      view("preview");
+    }).catch(function () { showErrors([{ field: "", message: "Request failed. Is the server running?" }]); })
+      .finally(function () { btnPreview.disabled = false; });
+  });
+
+  btnCreate.addEventListener("click", function () {
+    clearErrors();
+    setBusy(true, "Generating…");
+    post("create").then(function (d) {
+      if (!d.ok) { setBusy(false); return showErrors(d.errors); }
+      showResult(d);
+    }).catch(function () { setBusy(false); showErrors([{ field: "", message: "Request failed. Is the server running?" }]); });
+  });
+
+  function showResult(d) {
+    var files = d.files.map(function (f) { return '<li><i class="fa-solid fa-file-circle-plus"></i><code>' + esc(f) + "</code></li>"; }).join("");
+    var db = d.applied
+      ? '<li><i class="fa-solid fa-database"></i>Table <code>' + esc(d.table) + "</code> created in the database</li>"
+      : (d.apply_error
+          ? '<li><i class="fa-solid fa-triangle-exclamation" style="color:#d97706"></i>Migration not applied: ' + esc(d.apply_error) + "</li>"
+          : '<li><i class="fa-solid fa-clock" style="color:#d97706"></i>Migration created. Apply it from the Database page.</li>');
+    document.getElementById("tb-result").innerHTML =
+      '<div class="ok-icon"><i class="fa-solid fa-check"></i></div>' +
+      "<h3>" + esc(d.model) + " is ready</h3>" +
+      '<div class="tb-muted" style="color:var(--adm-muted)">API at <code>' + esc(d.api_path) + "</code>, plus an admin page and a card on the diagram.</div>" +
+      "<ul>" + files + db + "</ul>" +
+      '<div class="tb-status" id="tb-status"><i class="fa-solid fa-spinner fa-spin"></i><span>Waiting for the server to load the new code…</span></div>';
+    busy = false;
+    setBusy(false);
+    view("result");
+    document.getElementById("tb-note").innerHTML = '<i class="fa-regular fa-file-code"></i>The files are yours: edit them like any other code.';
+    busy = true;
+    waitForReload(d.table, Date.now());
+  }
+
+  function waitForReload(table, started) {
+    fetch(window.location.pathname + "?format=json", { credentials: "same-origin", cache: "no-store" })
+      .then(function (r) { if (!r.ok) throw new Error(r.status); return r.json(); })
+      .then(function (s) {
+        if (s.tables.some(function (t) { return t.name === table; })) {
+          document.getElementById("tb-status").innerHTML = '<i class="fa-solid fa-circle-check" style="color:#16a34a"></i><span>Loaded. Opening the new table…</span>';
+          busy = false;
+          setTimeout(function () { window.location.href = window.location.pathname + "?focus=" + encodeURIComponent(table); }, 600);
+        } else { retry(); }
+      })
+      .catch(retry);
+    function retry() {
+      if (Date.now() - started > 30000) {
+        busy = false;
+        var st = document.getElementById("tb-status");
+        st.className = "tb-status warn";
+        st.innerHTML = '<i class="fa-solid fa-rotate"></i><span>The server didn\'t reload by itself. Restart it (or run it with <code>--reload</code>) to load the new model and API, then refresh this page.</span>';
+        return;
+      }
+      setTimeout(function () { waitForReload(table, started); }, 1000);
+    }
+  }
+
+  view("form");
+})();
+</script>
+{% endif %}
+{% endblock %}

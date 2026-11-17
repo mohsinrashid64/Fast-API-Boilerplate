@@ -1,0 +1,33 @@
+{{ header }}
+{% if r.needs_decimal %}
+from decimal import Decimal
+
+{% endif %}
+from sqlalchemy import {{ r.sa_imports | join(", ") }}
+{% if r.relations %}
+from sqlalchemy.orm import relationship
+{% endif %}
+
+from app.database.db_config import Base
+
+
+class {{ r.class_name }}(Base):
+    __tablename__ = "{{ r.table_name }}"
+
+    id = Column(Integer, primary_key=True, index=True)
+{% for c in r.columns %}
+    {{ c.name }} = Column({{ c.sa_type }}, nullable={{ c.nullable }}{% if c.unique %}, unique=True{% endif %}{% if c.index %}, index=True{% endif %}{% if c.default_expr %}, default={{ c.default_expr }}{% endif %})
+{% endfor %}
+{% for rel in r.relations %}
+    {{ rel.column }} = Column(Integer, ForeignKey("{{ rel.target_table }}.{{ rel.target_pk }}", ondelete="{{ rel.on_delete }}"), nullable={{ rel.nullable }}, index=True)
+{% endfor %}
+{% if r.timestamps %}
+    created_at = Column(DateTime, default=func.now())
+    updated_at = Column(DateTime, default=func.now(), onupdate=func.now())
+{% endif %}
+{% if r.relations %}
+
+{% for rel in r.relations %}
+    {{ rel.name }} = relationship("{{ rel.target_class }}")
+{% endfor %}
+{% endif %}

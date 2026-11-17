@@ -1,85 +1,74 @@
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
-from typing import List
-from app.database.db_config import get_db
+
+from app.core.deps import get_current_user
 from app.crud import product_crud
-from app.schemas.product import ProductOut, ProductCreate, ProductUpdate
-from app.utils.jwt import get_current_user
-
-
+from app.database import get_db
+from app.models import User
+from app.schemas import ProductCreate, ProductOut, ProductUpdate
 
 router = APIRouter(prefix="/products", tags=["Products"])
 
+# Every endpoint is scoped to the current user: other users' products are 404.
 
-# ✅ Create product
+
 @router.post("/", response_model=ProductOut, status_code=status.HTTP_201_CREATED)
 async def create_product(
     product_in: ProductCreate,
     db: AsyncSession = Depends(get_db),
-    current_user=Depends(get_current_user)
+    current_user: User = Depends(get_current_user),
 ):
-    new_product = await product_crud.create(db, obj_in=product_in, user_id=current_user['id'])
-    return new_product
+    return await product_crud.create(db, obj_in=product_in, user_id=current_user.id)
 
 
-# ✅ Get all products (admin view or general list)
-@router.get("/", response_model=List[ProductOut])
-async def get_products(
-    skip: int = 0, limit: int = 10,
+@router.get("/", response_model=list[ProductOut])
+async def list_products(
+    skip: int = Query(0, ge=0),
+    limit: int = Query(10, ge=1, le=100),
     db: AsyncSession = Depends(get_db),
-    current_user=Depends(get_current_user)
+    current_user: User = Depends(get_current_user),
 ):
-    products = await product_crud.get_all(db, skip=skip, limit=limit, user_id=current_user['id'])
-    return products
+    return await product_crud.get_all(db, skip=skip, limit=limit, user_id=current_user.id)
 
 
-
-# ✅ Get product by ID
 @router.get("/{product_id}", response_model=ProductOut)
 async def get_product(
     product_id: int,
     db: AsyncSession = Depends(get_db),
-    current_user=Depends(get_current_user)
+    current_user: User = Depends(get_current_user),
 ):
-    product = await product_crud.get(db, id=product_id, user_id=current_user['id'])
-    return product
+    return await product_crud.get(db, id=product_id, user_id=current_user.id)
 
 
-# ✅ Update product
 @router.put("/{product_id}", response_model=ProductOut)
-async def update_product(
+async def replace_product(
     product_id: int,
-    product_in: ProductUpdate,
+    product_in: ProductCreate,
     db: AsyncSession = Depends(get_db),
-    current_user=Depends(get_current_user)
+    current_user: User = Depends(get_current_user),
 ):
-    product = await product_crud.get(db, id=product_id)
-    updated_product = await product_crud.update(db, db_obj=product, obj_in=product_in)
-    return updated_product
+    """Full update: all fields are required."""
+    product = await product_crud.get(db, id=product_id, user_id=current_user.id)
+    return await product_crud.update(db, db_obj=product, obj_in=product_in.model_dump())
 
 
 @router.patch("/{product_id}", response_model=ProductOut)
 async def update_product(
     product_id: int,
-    product_update: ProductUpdate,
+    product_in: ProductUpdate,
     db: AsyncSession = Depends(get_db),
-    current_user=Depends(get_current_user),
+    current_user: User = Depends(get_current_user),
 ):
-    """
-    Partially update a product.
-    Only the product owner can update their own product.
-    """
-    db_product = await product_crud.get(db=db, id=product_id)
-    updated_product = await product_crud.update(db=db, db_obj=db_product, obj_in=product_update)
-    return updated_product
+    """Partial update: only the fields sent are changed."""
+    product = await product_crud.get(db, id=product_id, user_id=current_user.id)
+    return await product_crud.update(db, db_obj=product, obj_in=product_in)
 
 
-# ✅ Delete product
 @router.delete("/{product_id}")
 async def delete_product(
     product_id: int,
     db: AsyncSession = Depends(get_db),
-    current_user=Depends(get_current_user)
+    current_user: User = Depends(get_current_user),
 ):
-    await product_crud.delete(db, id=product_id, user_id=current_user["id"])
+    await product_crud.delete(db, id=product_id, user_id=current_user.id)
     return {"detail": "Product deleted successfully"}

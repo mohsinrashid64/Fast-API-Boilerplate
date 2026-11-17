@@ -1,31 +1,36 @@
 import re
-import dns.resolver
-from fastapi import HTTPException
 
-# Define known email providers for domain validation
+import dns.exception
+import dns.resolver
+
+# Only emails from these providers are accepted at signup. Edit to suit your app.
 KNOWN_EMAIL_PROVIDERS = {"gmail.com", "outlook.com", "yahoo.com", "icloud.com", "hotmail.com"}
+
+_EMAIL_REGEX = re.compile(r"^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$")
+
 
 def validate_email_format(email: str) -> bool:
     """Validate the format of an email address using regex."""
-    email_regex = r"^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$"
-    return re.match(email_regex, email) is not None
+    return _EMAIL_REGEX.match(email) is not None
 
 
-def validate_email_domain(email: str):
-    """Validate the domain of the email."""
-    domain = email.split("@")[-1]
+def validate_email_domain(email: str) -> str:
+    """Ensure the email belongs to a known provider. Raises ValueError otherwise."""
+    domain = email.split("@")[-1].lower()
     if domain not in KNOWN_EMAIL_PROVIDERS:
-        raise HTTPException(status_code=400, detail=f"The domain '{domain}' is not a known email provider.")
+        raise ValueError(f"The domain '{domain}' is not a known email provider.")
     return domain
 
 
-def validate_email_mx_records(domain: str):
-    """Check if the domain has valid MX records."""
+def has_mx_records(domain: str) -> bool:
+    """Blocking DNS lookup: True if the domain has MX records.
+
+    Call it via `asyncio.to_thread` from async code.
+    """
     try:
-        answers = dns.resolver.resolve(domain, "MX")
-        if not answers:
-            raise HTTPException(status_code=400, detail=f"The domain '{domain}' does not have valid MX records.")
-    except dns.resolver.NoAnswer:
-        raise HTTPException(status_code=400, detail=f"The domain '{domain}' does not have valid MX records.")
-    except dns.resolver.NXDOMAIN:
-        raise HTTPException(status_code=400, detail=f"The domain '{domain}' does not exist.")
+        return bool(dns.resolver.resolve(domain, "MX", lifetime=5))
+    except (dns.resolver.NoAnswer, dns.resolver.NXDOMAIN, dns.resolver.NoNameservers):
+        return False
+    except dns.exception.Timeout:
+        # Don't block signups because of a flaky resolver.
+        return True
